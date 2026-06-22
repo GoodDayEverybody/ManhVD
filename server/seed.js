@@ -42,6 +42,7 @@ tx(() => {
     DELETE FROM order_types;
     DELETE FROM sizes;
     DELETE FROM apps;
+    DELETE FROM partners;
     DELETE FROM users;
     DELETE FROM counters;
     DELETE FROM sqlite_sequence;
@@ -74,13 +75,13 @@ for (const name of UA_NAMES) {
 
 // Editors (designer | video | both)
 const EDITORS = [
-  { name: 'Khải', type: 'designer' },
-  { name: 'Hà', type: 'designer' },
-  { name: 'Quang', type: 'designer' },
-  { name: 'Cường', type: 'both' },     // designer + video
-  { name: 'Hoàn', type: 'both' },      // designer + video
-  { name: 'Khánh', type: 'both' },     // designer + video
-  { name: 'Phương Trang', type: 'designer' },
+  { name: 'Khải', type: 'graphic' },
+  { name: 'Hà', type: 'graphic' },
+  { name: 'Quang', type: 'graphic' },
+  { name: 'Cường', type: 'video' },
+  { name: 'Hoàn', type: 'video' },
+  { name: 'Khánh', type: 'video' },
+  { name: 'Phương Trang', type: 'uiux' },
 ];
 const editorIds = {};
 const editorById = [];
@@ -146,8 +147,13 @@ for (const [name, pts, qty, note] of VIDEO_TYPES) {
 
 // ---- Apps ----------------------------------------------------------------
 
+// ---- Partners ------------------------------------------------------------
+
+const insPartner = db.prepare('INSERT INTO partners (name) VALUES (?)');
+['Yutalabs', 'Qtonz'].forEach(p => insPartner.run(p));
+
 const insApp = db.prepare(
-  'INSERT INTO apps (code, name, partner, link, app_code, mkter, product_manager, status) VALUES (?,?,?,?,?,?,?,?)'
+  'INSERT INTO apps (code, name, partner, link, figma_link, app_code, mkter, product_manager, status) VALUES (?,?,?,?,?,?,?,?,?)'
 );
 
 const APPS = [
@@ -156,16 +162,17 @@ const APPS = [
   ['QIP074', 'AI Wallpaper HD', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.wallpaper', 'CODE074', 'ThinhVQ', 'BaoDX', 'Đang chạy'],
   ['QIP075', 'Scanner & PDF', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.scanner', 'CODE075', 'TrangNTT', 'ManhVD', 'Đợi bàn giao'],
   ['QIP076', 'Music Player Offline', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.music', 'CODE076', 'TriNN', 'BaoDX', 'Đang chạy'],
-  ['QIP077', 'Workout at Home', 'Partner2', 'https://play.google.com/store/apps/details?id=com.p2.workout', 'CODE077', 'VyNH', 'ThinhVQ', 'Đang chạy'],
+  ['QIP077', 'Workout at Home', 'Yutalabs', 'https://play.google.com/store/apps/details?id=com.p2.workout', 'CODE077', 'VyNH', 'ThinhVQ', 'Đang chạy'],
   ['QIP078', 'Caller ID & Block', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.callerid', 'CODE078', 'ChauPM', 'ManhVD', 'Đang chạy'],
-  ['QIP079', 'Weather Live', 'Partner2', 'https://play.google.com/store/apps/details?id=com.p2.weather', 'CODE079', 'PhucTX', 'BaoDX', 'Dừng'],
+  ['QIP079', 'Weather Live', 'Yutalabs', 'https://play.google.com/store/apps/details?id=com.p2.weather', 'CODE079', 'PhucTX', 'BaoDX', 'Dừng'],
   ['QIP080', 'Notes & Reminder', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.notes', 'CODE080', 'TrangVTQ', 'ThinhVQ', 'Đợi bàn giao'],
 ];
 const appRows = [];
 for (const a of APPS) {
   // Mã CODE tự tạo theo quy tắc: "Mã - Tên app"
   const appCode = a[0] + ' - ' + a[1];
-  const r = insApp.run(a[0], a[1], a[2], a[3], appCode, a[5], a[6], a[7]);
+  const figma = 'https://figma.com/file/' + a[0];
+  const r = insApp.run(a[0], a[1], a[2], a[3], figma, appCode, a[5], a[6], a[7]);
   appRows.push({ id: r.lastInsertRowid, name: a[1], partner: a[2], code: a[0] });
 }
 
@@ -204,8 +211,8 @@ const OBJECTIVES_IMG = ['Ảnh quảng cáo', 'Localize Ảnh quảng cáo', 'Re
 const OBJECTIVES_VID = ['Video quảng cáo', 'Video cắt dựng', 'Resize + Thay outro', 'Localize Video'];
 
 const uaIdList = Object.values(uaIds);
-const designerIds = editorById.filter(e => e.type === 'designer' || e.type === 'both').map(e => e.id);
-const videoEditorIds = editorById.filter(e => e.type === 'video' || e.type === 'both').map(e => e.id);
+const designerIds = editorById.filter(e => e.type === 'graphic' || e.type === 'uiux').map(e => e.id);
+const videoEditorIds = editorById.filter(e => e.type === 'video').map(e => e.id);
 
 const seedOrders = (count) => tx(() => {
   for (let i = 0; i < count; i++) {

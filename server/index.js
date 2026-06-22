@@ -93,8 +93,9 @@ app.get('/api/meta', authenticate, (req, res) => {
   const orderTypes = db.prepare('SELECT id, category, name, points, quantity_note, note FROM order_types ORDER BY sort_order').all();
   const editors = db.prepare("SELECT id, full_name, editor_type FROM users WHERE role='editor' AND active=1 ORDER BY full_name").all();
   const uas = db.prepare("SELECT id, full_name FROM users WHERE role='ua' AND active=1 ORDER BY full_name").all();
+  const partners = db.prepare('SELECT name FROM partners ORDER BY name').all().map(p => p.name);
   res.json({
-    orderTypes, editors, uas,
+    orderTypes, editors, uas, partners,
     statuses: STATUSES,
     appStatuses: APP_STATUSES,
     sizes: getSizesGrouped(),
@@ -116,9 +117,9 @@ app.post('/api/apps', authenticate, requireRole('admin'), (req, res) => {
   const b = req.body || {};
   if (!b.code || !b.name) return res.status(400).json({ error: 'Cần Mã app và Tên app' });
   try {
-    const r = db.prepare(`INSERT INTO apps (code,name,partner,link,app_code,mkter,product_manager,status)
-      VALUES (?,?,?,?,?,?,?,?)`).run(
-      b.code, b.name, b.partner || '', b.link || '', b.app_code || '',
+    const r = db.prepare(`INSERT INTO apps (code,name,partner,link,figma_link,app_code,mkter,product_manager,status)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(
+      b.code, b.name, b.partner || '', b.link || '', b.figma_link || '', b.app_code || '',
       b.mkter || '', b.product_manager || '', b.status || 'Đang chạy');
     res.json(db.prepare('SELECT * FROM apps WHERE id = ?').get(r.lastInsertRowid));
   } catch (e) {
@@ -130,9 +131,9 @@ app.put('/api/apps/:id', authenticate, requireRole('admin'), (req, res) => {
   const b = req.body || {};
   const app0 = db.prepare('SELECT * FROM apps WHERE id = ?').get(req.params.id);
   if (!app0) return res.status(404).json({ error: 'Không tìm thấy app' });
-  db.prepare(`UPDATE apps SET code=?,name=?,partner=?,link=?,app_code=?,mkter=?,product_manager=?,status=? WHERE id=?`).run(
+  db.prepare(`UPDATE apps SET code=?,name=?,partner=?,link=?,figma_link=?,app_code=?,mkter=?,product_manager=?,status=? WHERE id=?`).run(
     b.code ?? app0.code, b.name ?? app0.name, b.partner ?? app0.partner, b.link ?? app0.link,
-    b.app_code ?? app0.app_code, b.mkter ?? app0.mkter, b.product_manager ?? app0.product_manager,
+    b.figma_link ?? app0.figma_link, b.app_code ?? app0.app_code, b.mkter ?? app0.mkter, b.product_manager ?? app0.product_manager,
     b.status ?? app0.status, req.params.id);
   res.json(db.prepare('SELECT * FROM apps WHERE id = ?').get(req.params.id));
 });
@@ -304,7 +305,7 @@ app.post('/api/users', authenticate, requireRole('admin'), (req, res) => {
   try {
     const r = db.prepare('INSERT INTO users (username, password_hash, full_name, role, editor_type) VALUES (?,?,?,?,?)').run(
       String(b.username).trim().toLowerCase(), bcrypt.hashSync(b.password || '123456', 10),
-      b.full_name, b.role, b.role === 'editor' ? (b.editor_type || 'designer') : null);
+      b.full_name, b.role, b.role === 'editor' ? (b.editor_type || 'graphic') : null);
     res.json(db.prepare('SELECT id, username, full_name, role, editor_type, active FROM users WHERE id = ?').get(r.lastInsertRowid));
   } catch (e) {
     res.status(400).json({ error: 'Username đã tồn tại' });
@@ -317,7 +318,7 @@ app.put('/api/users/:id', authenticate, requireRole('admin'), (req, res) => {
   const b = req.body || {};
   db.prepare('UPDATE users SET full_name=?, role=?, editor_type=?, active=? WHERE id=?').run(
     b.full_name ?? u.full_name, b.role ?? u.role,
-    (b.role ?? u.role) === 'editor' ? (b.editor_type ?? u.editor_type ?? 'designer') : null,
+    (b.role ?? u.role) === 'editor' ? (b.editor_type ?? u.editor_type ?? 'graphic') : null,
     b.active != null ? (b.active ? 1 : 0) : u.active, u.id);
   if (b.password) db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(b.password, 10), u.id);
   res.json(db.prepare('SELECT id, username, full_name, role, editor_type, active FROM users WHERE id = ?').get(u.id));
@@ -388,6 +389,43 @@ app.put('/api/sizes/:id', authenticate, requireRole('admin'), (req, res) => {
 
 app.delete('/api/sizes/:id', authenticate, requireRole('admin'), (req, res) => {
   db.prepare('DELETE FROM sizes WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---- Cài đặt: Đối tác (partners) -----------------------------------------
+
+app.get('/api/partners', authenticate, (req, res) => {
+  res.json(db.prepare('SELECT * FROM partners ORDER BY name').all());
+});
+
+app.post('/api/partners', authenticate, requireRole('admin'), (req, res) => {
+  const name = (req.body && req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Cần tên đối tác' });
+  try {
+    const r = db.prepare('INSERT INTO partners (name) VALUES (?)').run(name);
+    res.json(db.prepare('SELECT * FROM partners WHERE id = ?').get(r.lastInsertRowid));
+  } catch (e) { res.status(400).json({ error: 'Đối tác đã tồn tại' }); }
+});
+
+app.put('/api/partners/:id', authenticate, requireRole('admin'), (req, res) => {
+  const p = db.prepare('SELECT * FROM partners WHERE id = ?').get(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Không tìm thấy' });
+  const name = (req.body && req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Cần tên đối tác' });
+  try {
+    db.prepare('UPDATE partners SET name=? WHERE id=?').run(name, p.id);
+    // Đồng bộ tên đối tác trên các app đang dùng
+    db.prepare('UPDATE apps SET partner=? WHERE partner=?').run(name, p.name);
+    res.json(db.prepare('SELECT * FROM partners WHERE id = ?').get(p.id));
+  } catch (e) { res.status(400).json({ error: 'Đối tác đã tồn tại' }); }
+});
+
+app.delete('/api/partners/:id', authenticate, requireRole('admin'), (req, res) => {
+  const p = db.prepare('SELECT * FROM partners WHERE id = ?').get(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Không tìm thấy' });
+  const used = db.prepare('SELECT COUNT(*) c FROM apps WHERE partner = ?').get(p.name).c;
+  if (used > 0) return res.status(400).json({ error: 'Không thể xóa: đang có ' + used + ' app thuộc đối tác này.' });
+  db.prepare('DELETE FROM partners WHERE id = ?').run(p.id);
   res.json({ ok: true });
 });
 

@@ -58,12 +58,18 @@ function init() {
       code            TEXT UNIQUE NOT NULL,       -- Mã app: QIP072...
       name            TEXT NOT NULL,              -- Tên app
       partner         TEXT,                       -- Đối tác
-      link            TEXT,                       -- Link app
-      app_code        TEXT,                       -- Mã CODE
+      link            TEXT,                       -- Link app (store)
+      figma_link      TEXT,                       -- Link Figma
+      app_code        TEXT,                       -- Mã CODE (tự tạo)
       mkter           TEXT,                       -- UA phụ trách
-      product_manager TEXT,
-      status          TEXT NOT NULL DEFAULT 'Đang chạy', -- Tạm dừng | Đang chạy | Đợi bàn giao | Dừng
+      product_manager TEXT,                       -- PO
+      status          TEXT NOT NULL DEFAULT 'Đang chạy', -- Đang chạy | Đợi bàn giao | Dừng
       created_at      TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+
+    CREATE TABLE IF NOT EXISTS partners (
+      id   INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS order_types (
@@ -126,6 +132,7 @@ function init() {
   // Migration nhẹ: thêm cột còn thiếu cho DB cũ
   const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col);
   if (!hasColumn('order_types', 'note')) db.exec('ALTER TABLE order_types ADD COLUMN note TEXT');
+  if (!hasColumn('apps', 'figma_link')) db.exec('ALTER TABLE apps ADD COLUMN figma_link TEXT');
 }
 
 // Sinh mã order kế tiếp. label: 'V' cho video, 'A' cho ảnh.
