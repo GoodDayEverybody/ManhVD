@@ -4,7 +4,8 @@
   "description": "Hệ thống quản lý order creatives (ảnh + video quảng cáo) cho UA và Editor",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js",
+    "start": "node --watch server/index.js",
+    "start:once": "node server/index.js",
     "seed": "node server/seed.js",
     "setup": "node server/seed.js"
   },
