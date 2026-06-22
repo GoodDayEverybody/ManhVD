@@ -4,8 +4,29 @@
 
 const State = { user: null, meta: null };
 const charts = [];
+const datepickers = [];
 
 function destroyCharts() { while (charts.length) { try { charts.pop().destroy(); } catch (e) {} } }
+function destroyDatepickers() { while (datepickers.length) { try { datepickers.pop().destroy(); } catch (e) {} } }
+
+// Gắn bộ chọn lịch (flatpickr): bấm chọn từ lịch, hiển thị dd/mm/yyyy,
+// nhưng giá trị bên trong vẫn là yyyy-mm-dd để lọc/lưu.
+function initDatePicker(inp, defaultDate, onChange) {
+  if (!window.flatpickr) { // dự phòng nếu thư viện không tải được
+    inp.type = 'date';
+    if (defaultDate) inp.value = defaultDate;
+    if (onChange) inp.addEventListener('change', () => onChange(inp.value));
+    return null;
+  }
+  const fp = flatpickr(inp, {
+    dateFormat: 'Y-m-d', altInput: true, altFormat: 'd/m/Y', allowInput: false,
+    locale: (window.vn && window.vn.Vietnamese) || 'default',
+    defaultDate: defaultDate || null,
+    onChange: (sel, dateStr) => { if (onChange) onChange(dateStr); },
+  });
+  datepickers.push(fp);
+  return fp;
+}
 
 async function api(path, opts = {}) {
   const res = await fetch('/api' + path, {
@@ -42,19 +63,6 @@ function toast(msg, type = 'ok') {
 }
 
 function fmtDate(s) { return s ? String(s).slice(0, 10).split('-').reverse().join('/') : ''; }
-// dd/mm/yyyy -> yyyy-mm-dd (chuẩn để lọc/lưu); trả null nếu sai
-function parseDMY(s) {
-  const m = String(s).trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
-  if (!m) return null;
-  const d = +m[1], mo = +m[2], y = +m[3];
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-}
-// yyyy-mm-dd -> dd/mm/yyyy để hiển thị trong ô nhập
-function toDMY(iso) {
-  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
-}
 function fmtNum(n) { return (Math.round((n || 0) * 100) / 100).toLocaleString('vi-VN'); }
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
@@ -213,6 +221,7 @@ const ROUTES = {
 function route() {
   if (!State.user) return;
   destroyCharts();
+  destroyDatepickers();
   document.getElementById('sidebar')?.classList.remove('open');
   document.getElementById('backdrop')?.classList.remove('show');
   const hash = location.hash.replace('#/', '') || 'dashboard';
@@ -453,18 +462,13 @@ function filterSelect(key, label, options, apply) {
   sel.addEventListener('change', () => { if (sel.value) orderFilters[key] = sel.value; else delete orderFilters[key]; apply(); });
   return el('div', { class: 'field' }, el('label', {}, label), sel);
 }
-// Ô nhập ngày dạng dd/mm/yyyy (Ngày/Tháng/Năm)
+// Ô chọn ngày bằng lịch (dd/mm/yyyy)
 function filterDate(key, label, apply) {
-  const inp = el('input', { type: 'text', placeholder: 'dd/mm/yyyy', inputmode: 'numeric', value: toDMY(orderFilters[key]) });
-  const commit = () => {
-    const v = inp.value.trim();
-    if (!v) { delete orderFilters[key]; apply(); return; }
-    const iso = parseDMY(v);
-    if (iso) { orderFilters[key] = iso; apply(); }
-    else { toast('Ngày không hợp lệ. Nhập dạng dd/mm/yyyy, vd: 31/12/2026', 'err'); }
-  };
-  inp.addEventListener('change', commit);
-  inp.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); });
+  const inp = el('input', { type: 'text', placeholder: 'Chọn ngày', readonly: true });
+  setTimeout(() => initDatePicker(inp, orderFilters[key] || null, (dateStr) => {
+    if (dateStr) orderFilters[key] = dateStr; else delete orderFilters[key];
+    apply();
+  }), 0);
   return el('div', { class: 'field' }, el('label', {}, label), inp);
 }
 
@@ -579,7 +583,8 @@ async function buildOrderForm(container, order, inline, closeM) {
     appList.map(a => el('option', { value: a.id, selected: order && order.app_id === a.id }, a.code + ' · ' + a.name)));
 
   const objective = el('input', { value: order ? order.objective || '' : '', placeholder: 'vd: Ảnh quảng cáo, Video cắt dựng...' });
-  const orderDate = el('input', { type: 'date', value: order ? (order.order_date || '').slice(0, 10) : new Date().toISOString().slice(0, 10) });
+  const orderDateDefault = order ? (order.order_date || '').slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const orderDate = el('input', { type: 'text', readonly: true });
   const desc = el('textarea', { placeholder: 'Mô tả chi tiết yêu cầu...' }, order ? order.description || '' : '');
   const ref = el('input', { value: order ? order.ref_link || '' : '', placeholder: 'https://...' });
   const figma = el('input', { value: order ? order.link_figma || '' : '', placeholder: 'Link App / Figma' });
@@ -623,6 +628,8 @@ async function buildOrderForm(container, order, inline, closeM) {
     ) : null,
     isAdmin && order ? el('div', { class: 'field' }, el('label', {}, 'Trạng thái'), statusSel) : null,
   ));
+
+  initDatePicker(orderDate, orderDateDefault);
 
   const submit = async () => {
     const body = {
