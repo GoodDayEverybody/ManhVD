@@ -414,7 +414,7 @@ async function viewOrders(c) {
 
   const table = el('table', {},
     el('thead', {}, el('tr', {},
-      el('th', {}, 'Loại'), el('th', {}, 'Mã'), el('th', {}, 'App'), el('th', {}, 'Mục tiêu'),
+      el('th', {}, 'Loại'), el('th', {}, 'Mã'), el('th', {}, 'App'),
       showUA ? el('th', {}, 'Người order') : null, el('th', {}, 'Người làm'), el('th', {}, 'Trạng thái'), el('th', {}, 'Ngày order'), el('th', {}, 'Ngày hoàn thành'),
     )),
     el('tbody', {}, orders.map(o => {
@@ -422,7 +422,6 @@ async function viewOrders(c) {
         el('td', {}, catPill(o.category)),
         el('td', {}, el('span', { class: 'code-cell' }, o.order_code)),
         el('td', {}, appLabel(o)),
-        el('td', {}, o.objective || '—'),
         showUA ? el('td', {}, o.ua_name || '—') : null,
         el('td', {}, o.editor_name ? el('span', {}, o.editor_name) : el('span', { class: 'badge amber' }, 'Chưa giao')),
         el('td', {}, statusBadge(o.status)),
@@ -491,7 +490,6 @@ async function openOrderDetail(id) {
   add('App', appLabel(o));
   add('Đối tác', o.partner);
   add('Loại order', (o.order_type_name || '—') + (o.quantity_note ? ' · ' + o.quantity_note : ''));
-  add('Mục tiêu', o.objective);
   add('Người order', o.ua_name);
   add('Editor', o.editor_name || 'Chưa giao');
   add('Ngày order', fmtDate(o.order_date));
