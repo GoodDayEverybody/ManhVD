@@ -1,0 +1,19 @@
+{
+  "name": "order-creatives",
+  "version": "1.0.0",
+  "description": "Hệ thống quản lý order creatives (ảnh + video quảng cáo) cho UA và Editor",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "seed": "node server/seed.js",
+    "setup": "node server/seed.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.3.0",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2"
+  }
+}
