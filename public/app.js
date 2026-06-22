@@ -75,6 +75,11 @@ function appStatusBadge(s) {
   return el('span', { class: 'badge ' + (map[s] || 'gray') }, s);
 }
 function catPill(c) { return el('span', { class: 'cat-pill', title: c === 'video' ? 'Video' : 'Ảnh' }, c === 'video' ? '🎬' : '🖼️'); }
+// Code app = "Mã - Tên app" (vd: QIP100 - Caller ID)
+function appLabel(o) {
+  if (o.app_code && o.app_name) return o.app_code + ' - ' + o.app_name;
+  return o.app_code || o.app_name || '—';
+}
 
 /* ============================ Modal ============================ */
 
@@ -416,7 +421,7 @@ async function viewOrders(c) {
       const tr = el('tr', { style: 'cursor:pointer', onclick: () => openOrderDetail(o.id) },
         el('td', {}, catPill(o.category)),
         el('td', {}, el('span', { class: 'code-cell' }, o.order_code)),
-        el('td', {}, el('div', {}, o.app_name || '—'), el('div', { class: 'muted', style: 'font-size:12px' }, o.order_type_name || '')),
+        el('td', {}, el('div', {}, appLabel(o)), el('div', { class: 'muted', style: 'font-size:12px' }, o.order_type_name || '')),
         el('td', {}, o.objective || '—'),
         showUA ? el('td', {}, o.ua_name || '—') : null,
         el('td', {}, o.editor_name ? el('span', {}, o.editor_name) : el('span', { class: 'badge amber' }, 'Chưa giao')),
@@ -483,7 +488,7 @@ async function openOrderDetail(id) {
   const add = (k, v) => { dl.appendChild(el('dt', {}, k)); dl.appendChild(el('dd', {}, v == null || v === '' ? '—' : v)); };
   add('Mã order', el('span', { class: 'code-cell' }, o.order_code));
   add('Loại', o.category === 'video' ? '🎬 Video' : '🖼️ Ảnh');
-  add('App', (o.app_name || '—') + (o.app_code ? ' (' + o.app_code + ')' : ''));
+  add('App', appLabel(o));
   add('Đối tác', o.partner);
   add('Loại order', (o.order_type_name || '—') + (o.quantity_note ? ' · ' + o.quantity_note : ''));
   add('Mục tiêu', o.objective);
