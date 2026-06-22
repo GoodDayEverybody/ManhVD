@@ -231,7 +231,7 @@ function renderShell() {
     el('nav', {}, nav.map(([href, ico, label]) => el('a', { href, 'data-route': href }, el('span', {}, ico), el('span', {}, label)))),
     el('div', { class: 'user-box' },
       el('div', { class: 'name' }, u.full_name),
-      el('div', { class: 'role' }, u.role === 'ua' ? 'UA' : u.role === 'editor' ? ('Editor · ' + (u.editor_type || '')) : 'Admin'),
+      el('div', { class: 'role' }, u.role === 'editor' ? editorTypeLabel(u.editor_type) : (SIMPLE_ROLE_LABEL[u.role] || u.role)),
       el('button', { class: 'btn sm', style: 'margin-top:10px; width:100%; justify-content:center;', onclick: logout }, 'Đăng xuất'),
     ),
   );
