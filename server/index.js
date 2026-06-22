@@ -19,21 +19,17 @@ const PORT = process.env.PORT || 3000;
 // ---- Constants (metadata cho frontend) -----------------------------------
 
 const STATUSES = ['Chờ làm', 'Đang làm', 'Đã xong', 'Yêu cầu sửa'];
-const APP_STATUSES = ['Đang chạy', 'Đợi bàn giao', 'Tạm dừng', 'Dừng'];
-const OBJECTIVES = [
-  'Ảnh quảng cáo', 'Video quảng cáo', 'Localize Ảnh quảng cáo', 'Video cắt dựng',
-  'Resize + Thay outro', 'Bộ ảnh mới', 'Localize Video', 'Khác',
-];
-const SIZES = {
-  Google: ['1200x1200', '1200x628', '1200x1500'],
-  'Mintegral + Unity + Tiktok': ['1200x627', '320x210', '640x120', '320x50', '720x128',
-    '728x90', '720x1280', '768x1024', '600x600', '512x512', '800x800', '450x300',
-    '1080x2160', '750x1334', '210x210'],
-  Facebook: ['1200x628', '1080x1080', '1080x1920', '1080x1350'],
-  Other: ['512x512', '1024x500'],
-};
+const APP_STATUSES = ['Đang chạy', 'Đợi bàn giao', 'Dừng'];
 
 // ---- Helpers -------------------------------------------------------------
+
+// Size theo kênh, lấy từ DB (quản lý ở tab Cài đặt)
+function getSizesGrouped() {
+  const rows = db.prepare('SELECT platform, value FROM sizes ORDER BY sort_order, id').all();
+  const out = {};
+  for (const r of rows) { (out[r.platform] = out[r.platform] || []).push(r.value); }
+  return out;
+}
 
 const ORDER_SELECT = `
   SELECT o.*,
@@ -94,15 +90,14 @@ app.post('/api/me/password', authenticate, (req, res) => {
 // ---- Metadata ------------------------------------------------------------
 
 app.get('/api/meta', authenticate, (req, res) => {
-  const orderTypes = db.prepare('SELECT id, category, name, points, quantity_note FROM order_types ORDER BY sort_order').all();
+  const orderTypes = db.prepare('SELECT id, category, name, points, quantity_note, note FROM order_types ORDER BY sort_order').all();
   const editors = db.prepare("SELECT id, full_name, editor_type FROM users WHERE role='editor' AND active=1 ORDER BY full_name").all();
   const uas = db.prepare("SELECT id, full_name FROM users WHERE role='ua' AND active=1 ORDER BY full_name").all();
   res.json({
     orderTypes, editors, uas,
     statuses: STATUSES,
     appStatuses: APP_STATUSES,
-    objectives: OBJECTIVES,
-    sizes: SIZES,
+    sizes: getSizesGrouped(),
   });
 });
 
@@ -331,6 +326,68 @@ app.put('/api/users/:id', authenticate, requireRole('admin'), (req, res) => {
 app.delete('/api/users/:id', authenticate, requireRole('admin'), (req, res) => {
   // Vô hiệu hóa thay vì xóa (giữ lịch sử order)
   db.prepare('UPDATE users SET active = 0 WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---- Cài đặt: Loại order (order_types) -----------------------------------
+
+app.get('/api/order_types', authenticate, (req, res) => {
+  let sql = 'SELECT * FROM order_types';
+  const params = [];
+  if (req.query.category) { sql += ' WHERE category = ?'; params.push(req.query.category); }
+  sql += ' ORDER BY sort_order, id';
+  res.json(db.prepare(sql).all(...params));
+});
+
+app.post('/api/order_types', authenticate, requireRole('admin'), (req, res) => {
+  const b = req.body || {};
+  if (!b.name || !['image', 'video'].includes(b.category)) return res.status(400).json({ error: 'Thiếu tên hoặc loại không hợp lệ' });
+  const maxSort = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM order_types').get().m;
+  const r = db.prepare('INSERT INTO order_types (category, name, points, quantity_note, note, sort_order) VALUES (?,?,?,?,?,?)').run(
+    b.category, b.name, Number(b.points) || 0, b.quantity_note || '', b.note || '', maxSort + 1);
+  res.json(db.prepare('SELECT * FROM order_types WHERE id = ?').get(r.lastInsertRowid));
+});
+
+app.put('/api/order_types/:id', authenticate, requireRole('admin'), (req, res) => {
+  const t = db.prepare('SELECT * FROM order_types WHERE id = ?').get(req.params.id);
+  if (!t) return res.status(404).json({ error: 'Không tìm thấy' });
+  const b = req.body || {};
+  db.prepare('UPDATE order_types SET name=?, points=?, quantity_note=?, note=? WHERE id=?').run(
+    b.name ?? t.name, b.points != null ? Number(b.points) : t.points, b.quantity_note ?? t.quantity_note, b.note ?? t.note, t.id);
+  res.json(db.prepare('SELECT * FROM order_types WHERE id = ?').get(t.id));
+});
+
+app.delete('/api/order_types/:id', authenticate, requireRole('admin'), (req, res) => {
+  const used = db.prepare('SELECT COUNT(*) c FROM orders WHERE order_type_id = ?').get(req.params.id).c;
+  if (used > 0) return res.status(400).json({ error: 'Không thể xóa: đang có ' + used + ' order dùng loại này.' });
+  db.prepare('DELETE FROM order_types WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---- Cài đặt: Size theo kênh (sizes) -------------------------------------
+
+app.get('/api/sizes', authenticate, (req, res) => {
+  res.json(db.prepare('SELECT * FROM sizes ORDER BY sort_order, id').all());
+});
+
+app.post('/api/sizes', authenticate, requireRole('admin'), (req, res) => {
+  const b = req.body || {};
+  if (!b.platform || !b.value) return res.status(400).json({ error: 'Cần Kênh và Kích thước' });
+  const maxSort = db.prepare('SELECT COALESCE(MAX(sort_order),0) m FROM sizes').get().m;
+  const r = db.prepare('INSERT INTO sizes (platform, value, sort_order) VALUES (?,?,?)').run(b.platform.trim(), b.value.trim(), maxSort + 1);
+  res.json(db.prepare('SELECT * FROM sizes WHERE id = ?').get(r.lastInsertRowid));
+});
+
+app.put('/api/sizes/:id', authenticate, requireRole('admin'), (req, res) => {
+  const s = db.prepare('SELECT * FROM sizes WHERE id = ?').get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Không tìm thấy' });
+  const b = req.body || {};
+  db.prepare('UPDATE sizes SET platform=?, value=? WHERE id=?').run((b.platform ?? s.platform).trim(), (b.value ?? s.value).trim(), s.id);
+  res.json(db.prepare('SELECT * FROM sizes WHERE id = ?').get(s.id));
+});
+
+app.delete('/api/sizes/:id', authenticate, requireRole('admin'), (req, res) => {
+  db.prepare('DELETE FROM sizes WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 

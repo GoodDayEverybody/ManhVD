@@ -71,8 +71,16 @@ function init() {
       category      TEXT NOT NULL CHECK (category IN ('image','video')),
       name          TEXT NOT NULL,
       points        REAL NOT NULL DEFAULT 0,
-      quantity_note TEXT,
+      quantity_note TEXT,                          -- Số lượng/order
+      note          TEXT,                          -- Lưu ý
       sort_order    INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS sizes (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      platform   TEXT NOT NULL,
+      value      TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS orders (
@@ -114,6 +122,10 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
     CREATE INDEX IF NOT EXISTS idx_orders_date   ON orders(order_date);
   `);
+
+  // Migration nhẹ: thêm cột còn thiếu cho DB cũ
+  const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col);
+  if (!hasColumn('order_types', 'note')) db.exec('ALTER TABLE order_types ADD COLUMN note TEXT');
 }
 
 // Sinh mã order kế tiếp. label: 'V' cho video, 'A' cho ảnh.

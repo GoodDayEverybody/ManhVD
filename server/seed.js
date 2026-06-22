@@ -40,6 +40,7 @@ tx(() => {
   db.exec(`
     DELETE FROM orders;
     DELETE FROM order_types;
+    DELETE FROM sizes;
     DELETE FROM apps;
     DELETE FROM users;
     DELETE FROM counters;
@@ -93,52 +94,53 @@ for (const e of EDITORS) {
 // ---- Order types ---------------------------------------------------------
 
 const insType = db.prepare(
-  'INSERT INTO order_types (category, name, points, quantity_note, sort_order) VALUES (?,?,?,?,?)'
+  'INSERT INTO order_types (category, name, points, quantity_note, note, sort_order) VALUES (?,?,?,?,?,?)'
 );
 
+// [name, points, số lượng/order, lưu ý]
 const IMAGE_TYPES = [
-  ['Icon App', 1.5, '3 ảnh'],
-  ['Screenshot', 4.0, '8 ảnh'],
-  ['Feature Graphic', 2.0, '3 ảnh'],
-  ['In-App Content', 1.0, '-'],
-  ['Bộ Ảnh QC Mới (Google)', 2.0, '3 idea'],
-  ['Bộ Ảnh QC Mới (Mintegral+Unity)', 3.0, '3 ảnh'],
-  ['Bộ Ảnh QC Clone', 1.0, '3 idea'],
-  ['Resize Mintegral+Unity+Tiktok', 2.0, '3 ảnh'],
-  ['Resize Facebook', 0.5, '3 ảnh'],
-  ['Resize Other', 0.5, '3 ảnh'],
-  ['Localize Screenshot', 1.0, '1 order, 3 ngôn ngữ'],
-  ['Localize Feature Graphic', 0.5, '1 order, 3 ngôn ngữ'],
-  ['Localize Ảnh QC Google', 0.5, '3 ảnh, 3 ngôn ngữ'],
-  ['Localize Ảnh QC Facebook', 0.5, '3 ảnh, 3 ngôn ngữ'],
-  ['Localize Ảnh QC Mintegral+Unity+Tiktok', 2.0, '3 ảnh, 3 ngôn ngữ'],
-  ['HTML5', 2.5, '-'],
+  ['Icon App', 1.5, '3 ảnh', ''],
+  ['Screenshot', 4.0, '8 ảnh', ''],
+  ['Feature Graphic', 2.0, '3 ảnh', ''],
+  ['In-App Content', 1.0, '', ''],
+  ['Bộ Ảnh QC Mới (Google)', 2.0, '3 idea', ''],
+  ['Bộ Ảnh QC Mới (Mintegral+Unity)', 3.0, '3 ảnh', ''],
+  ['Bộ Ảnh QC Clone', 1.0, '3 idea', ''],
+  ['Resize Mintegral+Unity+Tiktok', 2.0, '3 ảnh', ''],
+  ['Resize Facebook', 0.5, '3 ảnh', ''],
+  ['Resize Other', 0.5, '3 ảnh', ''],
+  ['Localize Screenshot', 1.0, '1 order', '3 ngôn ngữ'],
+  ['Localize Feature Graphic', 0.5, '1 order', '3 ngôn ngữ'],
+  ['Localize Ảnh QC Google', 0.5, '3 ảnh', '3 ngôn ngữ'],
+  ['Localize Ảnh QC Facebook', 0.5, '3 ảnh', '3 ngôn ngữ'],
+  ['Localize Ảnh QC Mintegral+Unity+Tiktok', 2.0, '3 ảnh', '3 ngôn ngữ'],
+  ['HTML5', 2.5, '', ''],
 ];
 
 const VIDEO_TYPES = [
-  ['Outro quảng cáo', 1.0, '5 video'],
-  ['Video Promo', 1.5, '1 video'],
-  ['Video in-app', 0.5, '1 video'],
-  ['Resize+Thay outro', 0.5, '5 video'],
-  ['Resize+Thay outro+Sửa in-app', 1.0, '5 video'],
-  ['Video quảng cáo', 3.0, '2 video/order'],
-  ['Localize Video – Only Voice', 1.0, '5 video, 2 ngôn ngữ'],
-  ['Localize Video – Voice+Text', 2.5, '5 video, 2 ngôn ngữ'],
-  ['Localize Video Promo', 0.5, '-'],
-  ['Video cắt dựng – Gen AI', 1.0, '-'],
-  ['Video cắt dựng – Ít source', 1.5, '-'],
-  ['Video cắt dựng – Nhiều source', 2.0, '-'],
+  ['Outro quảng cáo', 1.0, '5 video', ''],
+  ['Video Promo', 1.5, '1 video', ''],
+  ['Video in-app', 0.5, '1 video', ''],
+  ['Resize+Thay outro', 0.5, '5 video', ''],
+  ['Resize+Thay outro+Sửa in-app', 1.0, '5 video', ''],
+  ['Video quảng cáo', 3.0, '2 video/order', ''],
+  ['Localize Video – Only Voice', 1.0, '5 video', '2 ngôn ngữ'],
+  ['Localize Video – Voice+Text', 2.5, '5 video', '2 ngôn ngữ'],
+  ['Localize Video Promo', 0.5, '', ''],
+  ['Video cắt dựng – Gen AI', 1.0, '', ''],
+  ['Video cắt dựng – Ít source', 1.5, '', ''],
+  ['Video cắt dựng – Nhiều source', 2.0, '', ''],
 ];
 
 const imageTypeIds = [];
 const videoTypeIds = [];
 let so = 0;
-for (const [name, pts, qty] of IMAGE_TYPES) {
-  const r = insType.run('image', name, pts, qty, so++);
+for (const [name, pts, qty, note] of IMAGE_TYPES) {
+  const r = insType.run('image', name, pts, qty, note, so++);
   imageTypeIds.push({ id: r.lastInsertRowid, points: pts, name });
 }
-for (const [name, pts, qty] of VIDEO_TYPES) {
-  const r = insType.run('video', name, pts, qty, so++);
+for (const [name, pts, qty, note] of VIDEO_TYPES) {
+  const r = insType.run('video', name, pts, qty, note, so++);
   videoTypeIds.push({ id: r.lastInsertRowid, points: pts, name });
 }
 
@@ -154,15 +156,32 @@ const APPS = [
   ['QIP074', 'AI Wallpaper HD', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.wallpaper', 'CODE074', 'ThinhVQ', 'BaoDX', 'Đang chạy'],
   ['QIP075', 'Scanner & PDF', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.scanner', 'CODE075', 'TrangNTT', 'ManhVD', 'Đợi bàn giao'],
   ['QIP076', 'Music Player Offline', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.music', 'CODE076', 'TriNN', 'BaoDX', 'Đang chạy'],
-  ['QIP077', 'Workout at Home', 'Partner2', 'https://play.google.com/store/apps/details?id=com.p2.workout', 'CODE077', 'VyNH', 'ThinhVQ', 'Tạm dừng'],
+  ['QIP077', 'Workout at Home', 'Partner2', 'https://play.google.com/store/apps/details?id=com.p2.workout', 'CODE077', 'VyNH', 'ThinhVQ', 'Đang chạy'],
   ['QIP078', 'Caller ID & Block', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.callerid', 'CODE078', 'ChauPM', 'ManhVD', 'Đang chạy'],
   ['QIP079', 'Weather Live', 'Partner2', 'https://play.google.com/store/apps/details?id=com.p2.weather', 'CODE079', 'PhucTX', 'BaoDX', 'Dừng'],
   ['QIP080', 'Notes & Reminder', 'Qtonz', 'https://play.google.com/store/apps/details?id=com.qtonz.notes', 'CODE080', 'TrangVTQ', 'ThinhVQ', 'Đợi bàn giao'],
 ];
 const appRows = [];
 for (const a of APPS) {
-  const r = insApp.run(...a);
+  // Mã CODE tự tạo theo quy tắc: "Mã - Tên app"
+  const appCode = a[0] + ' - ' + a[1];
+  const r = insApp.run(a[0], a[1], a[2], a[3], appCode, a[5], a[6], a[7]);
   appRows.push({ id: r.lastInsertRowid, name: a[1], partner: a[2], code: a[0] });
+}
+
+// ---- Sizes (theo kênh) ---------------------------------------------------
+
+const insSize = db.prepare('INSERT INTO sizes (platform, value, sort_order) VALUES (?,?,?)');
+const SIZE_DATA = {
+  'Google': ['1200x1200', '1200x628', '1200x1500'],
+  'Mintegral + Unity + Tiktok': ['1200x627', '320x210', '640x120', '320x50', '720x128',
+    '728x90', '720x1280', '768x1024', '600x600', '512x512', '800x800', '450x300',
+    '1080x2160', '750x1334', '210x210'],
+  'Facebook': ['1200x628', '1080x1080', '1080x1920', '1080x1350'],
+};
+let sizeSort = 0;
+for (const [plat, arr] of Object.entries(SIZE_DATA)) {
+  for (const v of arr) insSize.run(plat, v, sizeSort++);
 }
 
 // ---- Sample orders -------------------------------------------------------

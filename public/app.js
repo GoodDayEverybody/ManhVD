@@ -165,6 +165,7 @@ const NAV = {
     ['#/apps', '📱', 'Quản lý App'],
     ['#/users', '👥', 'Quản lý User'],
     ['#/reports', '📈', 'Báo cáo'],
+    ['#/settings', '⚙️', 'Cài đặt'],
   ],
   ua: [
     ['#/dashboard', '📊', 'Tổng quan'],
@@ -221,7 +222,10 @@ const ROUTES = {
   apps: viewApps,
   users: viewUsers,
   reports: viewReports,
+  settings: viewSettings,
 };
+
+async function refreshMeta() { State.meta = await api('/meta'); }
 
 function route() {
   if (!State.user) return;
@@ -781,15 +785,30 @@ function openAppForm(a) {
   const f = {};
   const mk = (key, label, val) => { const i = el('input', { value: val || '' }); f[key] = i; return el('div', { class: 'field' }, el('label', {}, label), i); };
   const status = el('select', {}, meta.appStatuses.map(s => el('option', { value: s, selected: a && a.status === s }, s)));
+
+  const codeField = mk('code', 'Mã app *', a && a.code);
+  const nameField = mk('name', 'Tên app *', a && a.name);
+  // Mã CODE tự tạo theo quy tắc "Mã - Tên app", không nhập tay
+  const appCode = el('input', { readonly: true, placeholder: 'Tự tạo: Mã - Tên app' });
+  if (a) appCode.value = (a.code && a.name) ? (a.code + ' - ' + a.name) : (a.app_code || '');
+  const syncCode = () => {
+    const c = f.code.value.trim(), n = f.name.value.trim();
+    appCode.value = (c && n) ? (c + ' - ' + n) : '';
+  };
+  f.code.addEventListener('input', syncCode);
+  f.name.addEventListener('input', syncCode);
+
   const body = el('div', {},
-    el('div', { class: 'form-row' }, mk('code', 'Mã app *', a && a.code), mk('name', 'Tên app *', a && a.name)),
-    el('div', { class: 'form-row' }, mk('partner', 'Đối tác', a && a.partner), mk('app_code', 'Mã CODE', a && a.app_code)),
+    el('div', { class: 'form-row' }, codeField, nameField),
+    el('div', { class: 'form-row' },
+      mk('partner', 'Đối tác', a && a.partner),
+      el('div', { class: 'field' }, el('label', {}, 'Mã CODE (tự tạo)'), appCode)),
     mk('link', 'Link app', a && a.link),
-    el('div', { class: 'form-row' }, mk('mkter', 'Mkter (UA)', a && a.mkter), mk('product_manager', 'Product Manager', a && a.product_manager)),
+    el('div', { class: 'form-row' }, mk('mkter', 'UA', a && a.mkter), mk('product_manager', 'PO', a && a.product_manager)),
     el('div', { class: 'field' }, el('label', {}, 'Tình trạng'), status),
   );
   const save = async () => {
-    const payload = { status: status.value };
+    const payload = { status: status.value, app_code: appCode.value };
     for (const k in f) payload[k] = f[k].value;
     if (!payload.code || !payload.name) return toast('Cần Mã app và Tên app', 'err');
     try {
@@ -825,10 +844,11 @@ async function viewUsers(c) {
   c.appendChild(el('div', { class: 'table-wrap' }, table));
 }
 
-function openUserForm(u) {
+function openUserForm(u, presetRole) {
   const fullName = el('input', { value: u ? u.full_name : '', placeholder: 'Họ tên' });
   const username = el('input', { value: u ? u.username : '', placeholder: 'username (chữ thường)', disabled: !!u });
-  const role = el('select', {}, [['ua', 'UA'], ['editor', 'Editor'], ['admin', 'Admin']].map(([v, t]) => el('option', { value: v, selected: u && u.role === v }, t)));
+  const role = el('select', {}, [['ua', 'UA'], ['editor', 'Editor'], ['admin', 'Admin']].map(([v, t]) => el('option', { value: v, selected: (u ? u.role === v : presetRole === v) }, t)));
+  if (!u && presetRole) role.disabled = true;
   const editorType = el('select', {}, [['designer', 'Designer'], ['video', 'Video Editor'], ['both', 'Designer + Video']].map(([v, t]) => el('option', { value: v, selected: u && u.editor_type === v }, t)));
   const etField = el('div', { class: 'field' }, el('label', {}, 'Loại editor'), editorType);
   const pass = el('input', { type: 'text', placeholder: u ? 'Để trống nếu không đổi' : 'Mặc định 123456' });
@@ -850,11 +870,155 @@ function openUserForm(u) {
     if (pass.value) payload.password = pass.value;
     try {
       if (u) { payload.active = Number(active.value); await api('/users/' + u.id, { method: 'PUT', body: payload }); }
-      else { payload.username = username.value; await api('/users', { method: 'POST', body: payload }); }
-      toast('Đã lưu'); closeM(); route();
+      else { payload.username = username.value; payload.role = presetRole || role.value; await api('/users', { method: 'POST', body: payload }); }
+      toast('Đã lưu'); closeM(); await refreshMeta(); route();
     } catch (e) { toast(e.message, 'err'); }
   };
   const closeM = openModal({ title: u ? 'Sửa user' : 'Thêm user', body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '💾 Lưu')] });
+}
+
+/* ============================ Cài đặt ============================ */
+
+let settingsTab = 'ua';
+
+async function viewSettings(c) {
+  setTitle('Cài đặt');
+  c.innerHTML = '';
+  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Cài đặt'),
+    el('span', { class: 'muted' }, '· dữ liệu nguồn cho các ô chọn ở những trang khác')));
+
+  const TABS = [['ua', '👤 UA'], ['editor', '🎨 Editor'], ['image', '🖼️ Loại order ảnh'], ['video', '🎬 Loại order video'], ['sizes', '📐 Size ảnh']];
+  c.appendChild(el('div', { class: 'tabs' }, TABS.map(([k, label]) =>
+    el('button', { class: settingsTab === k ? 'active' : '', onclick: () => { settingsTab = k; route(); } }, label))));
+
+  const box = el('div', {});
+  c.appendChild(box);
+  if (settingsTab === 'ua') await settingsUsers(box, 'ua');
+  else if (settingsTab === 'editor') await settingsUsers(box, 'editor');
+  else if (settingsTab === 'image') await settingsTypes(box, 'image');
+  else if (settingsTab === 'video') await settingsTypes(box, 'video');
+  else await settingsSizes(box);
+}
+
+async function settingsUsers(box, role) {
+  const users = await api('/users?role=' + role);
+  const tenVT = role === 'ua' ? 'UA' : 'Editor';
+  box.innerHTML = '';
+  box.appendChild(el('div', { class: 'page-head' },
+    el('span', { class: 'muted' }, 'Danh sách ' + tenVT + ' · ' + users.length),
+    el('span', { class: 'spacer' }),
+    el('button', { class: 'btn primary', onclick: () => openUserForm(null, role) }, '➕ Thêm ' + tenVT)));
+
+  const table = el('table', {},
+    el('thead', {}, el('tr', {}, el('th', {}, 'Họ tên'), el('th', {}, 'Username'),
+      role === 'editor' ? el('th', {}, 'Loại') : null, el('th', {}, 'Trạng thái'), el('th', {}, ''))),
+    el('tbody', {}, users.map(u => el('tr', { style: u.active ? '' : 'opacity:.5' },
+      el('td', {}, u.full_name),
+      el('td', {}, el('code', {}, u.username)),
+      role === 'editor' ? el('td', {}, u.editor_type === 'video' ? 'Video' : u.editor_type === 'both' ? 'Designer+Video' : 'Designer') : null,
+      el('td', {}, u.active ? el('span', { class: 'badge green' }, 'Hoạt động') : el('span', { class: 'badge gray' }, 'Đã khóa')),
+      el('td', { class: 'nowrap' },
+        el('button', { class: 'btn sm', onclick: () => openUserForm(u, role) }, '✏️'), ' ',
+        el('button', { class: 'btn sm danger', onclick: () => confirmDialog('Khóa tài khoản ' + u.full_name + '?', async () => { await api('/users/' + u.id, { method: 'DELETE' }); toast('Đã khóa'); await refreshMeta(); route(); }) }, '🗑'),
+      ),
+    ))),
+  );
+  box.appendChild(el('div', { class: 'table-wrap' }, table));
+}
+
+async function settingsTypes(box, category) {
+  const types = (State.meta.orderTypes || []).filter(t => t.category === category);
+  const tenLoai = category === 'image' ? 'Loại order ảnh' : 'Loại order video';
+  const qtyHead = category === 'image' ? 'Số lượng ảnh/order' : 'Số lượng video/order';
+  box.innerHTML = '';
+  box.appendChild(el('div', { class: 'page-head' },
+    el('span', { class: 'muted' }, tenLoai + ' · ' + types.length),
+    el('span', { class: 'spacer' }),
+    el('button', { class: 'btn primary', onclick: () => openTypeForm(null, category) }, '➕ Thêm loại')));
+
+  const table = el('table', {},
+    el('thead', {}, el('tr', {}, el('th', {}, tenLoai), el('th', {}, 'Điểm'), el('th', {}, qtyHead), el('th', {}, 'Lưu ý'), el('th', {}, ''))),
+    el('tbody', {}, types.map(t => el('tr', {},
+      el('td', {}, t.name),
+      el('td', {}, fmtNum(t.points)),
+      el('td', {}, t.quantity_note || '—'),
+      el('td', {}, t.note || '—'),
+      el('td', { class: 'nowrap' },
+        el('button', { class: 'btn sm', onclick: () => openTypeForm(t, category) }, '✏️'), ' ',
+        el('button', { class: 'btn sm danger', onclick: () => confirmDialog('Xóa loại "' + t.name + '"?', async () => { try { await api('/order_types/' + t.id, { method: 'DELETE' }); toast('Đã xóa'); await refreshMeta(); route(); } catch (e) { toast(e.message, 'err'); } }) }, '🗑'),
+      ),
+    ))),
+  );
+  box.appendChild(el('div', { class: 'table-wrap' }, table));
+}
+
+function openTypeForm(t, category) {
+  const name = el('input', { value: t ? t.name : '', placeholder: 'Tên loại order' });
+  const points = el('input', { type: 'number', step: '0.5', value: t ? t.points : '', placeholder: 'vd: 1.5' });
+  const qty = el('input', { value: t ? t.quantity_note || '' : '', placeholder: category === 'image' ? 'vd: 3 ảnh' : 'vd: 5 video' });
+  const note = el('input', { value: t ? t.note || '' : '', placeholder: 'vd: 3 ngôn ngữ' });
+  const body = el('div', {},
+    el('div', { class: 'field' }, el('label', {}, 'Tên loại order *'), name),
+    el('div', { class: 'form-row' },
+      el('div', { class: 'field' }, el('label', {}, 'Điểm'), points),
+      el('div', { class: 'field' }, el('label', {}, category === 'image' ? 'Số lượng ảnh/order' : 'Số lượng video/order'), qty)),
+    el('div', { class: 'field' }, el('label', {}, 'Lưu ý'), note),
+  );
+  const save = async () => {
+    if (!name.value.trim()) return toast('Cần tên loại order', 'err');
+    const payload = { category, name: name.value.trim(), points: Number(points.value) || 0, quantity_note: qty.value, note: note.value };
+    try {
+      if (t) await api('/order_types/' + t.id, { method: 'PUT', body: payload });
+      else await api('/order_types', { method: 'POST', body: payload });
+      toast('Đã lưu'); closeM(); await refreshMeta(); route();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const closeM = openModal({ title: t ? 'Sửa loại order' : 'Thêm loại order', body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '💾 Lưu')] });
+}
+
+async function settingsSizes(box) {
+  const sizes = await api('/sizes');
+  const platforms = [...new Set(sizes.map(s => s.platform))];
+  box.innerHTML = '';
+  box.appendChild(el('div', { class: 'page-head' },
+    el('span', { class: 'muted' }, 'Size ảnh theo kênh · ' + sizes.length + ' size'),
+    el('span', { class: 'spacer' }),
+    el('button', { class: 'btn primary', onclick: () => openSizeForm(null, platforms) }, '➕ Thêm size')));
+  box.appendChild(el('p', { class: 'hint', style: 'margin-bottom:14px' }, 'Các kênh & size ở đây sẽ hiện ra khi tạo order ảnh.'));
+
+  if (!platforms.length) { box.appendChild(el('div', { class: 'card' }, el('div', { class: 'empty' }, 'Chưa có size nào'))); return; }
+
+  platforms.forEach(plat => {
+    box.appendChild(el('div', { class: 'size-group-title', style: 'margin-top:16px' }, plat));
+    const grid = el('div', { class: 'size-grid' });
+    sizes.filter(s => s.platform === plat).forEach(s => {
+      grid.appendChild(el('span', { class: 'size-chip' }, s.value,
+        el('button', { class: 'chip-edit', title: 'Sửa', onclick: () => openSizeForm(s, platforms) }, '✏️'),
+        el('button', { class: 'chip-x', title: 'Xóa', onclick: () => confirmDialog('Xóa size ' + s.value + ' (' + s.platform + ')?', async () => { await api('/sizes/' + s.id, { method: 'DELETE' }); toast('Đã xóa'); await refreshMeta(); route(); }) }, '✕')));
+    });
+    box.appendChild(grid);
+  });
+}
+
+function openSizeForm(s, platforms) {
+  // kênh: chọn từ danh sách có sẵn hoặc gõ mới
+  const platSel = el('input', { value: s ? s.platform : '', placeholder: 'vd: Google', list: 'plat-list' });
+  const datalist = el('datalist', { id: 'plat-list' }, (platforms || []).map(p => el('option', { value: p })));
+  const value = el('input', { value: s ? s.value : '', placeholder: 'vd: 1200x628' });
+  const body = el('div', {},
+    el('div', { class: 'field' }, el('label', {}, 'Kênh *'), platSel, datalist),
+    el('div', { class: 'field' }, el('label', {}, 'Kích thước *'), value),
+  );
+  const save = async () => {
+    if (!platSel.value.trim() || !value.value.trim()) return toast('Cần Kênh và Kích thước', 'err');
+    const payload = { platform: platSel.value.trim(), value: value.value.trim() };
+    try {
+      if (s) await api('/sizes/' + s.id, { method: 'PUT', body: payload });
+      else await api('/sizes', { method: 'POST', body: payload });
+      toast('Đã lưu'); closeM(); await refreshMeta(); route();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const closeM = openModal({ title: s ? 'Sửa size' : 'Thêm size', body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '💾 Lưu')] });
 }
 
 /* ============================ Reports ============================ */
