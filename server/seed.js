@@ -80,7 +80,7 @@ const EDITORS = [
   { name: 'Quang', type: 'graphic' },
   { name: 'Cường', type: 'video' },
   { name: 'Hoàn', type: 'video' },
-  { name: 'Khánh', type: 'video' },
+  { name: 'Khánh', type: 'video_lead' },
   { name: 'Phương Trang', type: 'uiux' },
 ];
 const editorIds = {};
@@ -212,7 +212,7 @@ const OBJECTIVES_VID = ['Video quảng cáo', 'Video cắt dựng', 'Resize + Th
 
 const uaIdList = Object.values(uaIds);
 const designerIds = editorById.filter(e => e.type === 'graphic' || e.type === 'uiux').map(e => e.id);
-const videoEditorIds = editorById.filter(e => e.type === 'video').map(e => e.id);
+const videoEditorIds = editorById.filter(e => e.type === 'video' || e.type === 'video_lead').map(e => e.id);
 
 const seedOrders = (count) => tx(() => {
   for (let i = 0; i < count; i++) {
@@ -247,7 +247,7 @@ const seedOrders = (count) => tx(() => {
       size: isVideo ? pick(SIZES_VIDEO) : pick(SIZES_IMAGE),
       note_request: Math.random() < 0.4 ? 'Ưu tiên gấp, cần trong tuần này' : '',
       editor_id: editorId,
-      status: editorId ? status : 'Chờ làm',
+      status: editorId ? status : 'Đợi submit',
       drive_link: done ? 'https://drive.google.com/output/' + app.code : '',
       youtube_link: (done && isVideo) ? 'https://youtu.be/' + Math.random().toString(36).slice(2, 9) : '',
       completed_at: done ? daysAgo(Math.floor(Math.random() * 5)) : null,

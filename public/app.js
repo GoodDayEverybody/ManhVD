@@ -67,7 +67,7 @@ function fmtNum(n) { return (Math.round((n || 0) * 100) / 100).toLocaleString('v
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 function statusBadge(s) {
-  const map = { 'Chờ làm': 'gray', 'Đang làm': 'blue', 'Hoàn thành': 'green', 'Yêu cầu sửa': 'red', 'Hủy': 'darkred' };
+  const map = { 'Đợi submit': 'amber', 'Chờ làm': 'gray', 'Đang làm': 'blue', 'Hoàn thành': 'green', 'Yêu cầu sửa': 'red', 'Hủy': 'darkred' };
   return el('span', { class: 'badge ' + (map[s] || 'gray') }, s);
 }
 function appStatusBadge(s) {
@@ -82,14 +82,18 @@ function appLabel(o) {
 }
 // Nhãn loại editor
 function editorTypeLabel(t) {
-  return ({ graphic: 'Graphic Designer', video: 'Video Editor', uiux: 'UI/UX Designer', designer: 'Graphic Designer', both: 'Graphic+Video' })[t] || t || '';
+  return ({ graphic: 'Graphic Designer', video: 'Video Editor', video_lead: 'Video Editor Lead', uiux: 'UI/UX Designer', designer: 'Graphic Designer', both: 'Graphic+Video' })[t] || t || '';
 }
+// Vai trò "người order" (tạo + xem order của mình)
+const ORDERER_ROLES = ['ua', 'aso', 'po', 'hr'];
+const isOrdererRole = (r) => ORDERER_ROLES.includes(r);
+const isLeadUser = (u) => u && u.role === 'editor' && u.editor_type === 'video_lead';
 const SIMPLE_ROLE_LABEL = { ua: 'UA', aso: 'ASO', po: 'PO', hr: 'HR', admin: 'Admin' };
 // Badge vai trò có màu riêng cho dễ phân biệt
 function roleBadge(u) {
   const simple = { admin: 'red', ua: 'blue', aso: 'teal', po: 'indigo', hr: 'pink' };
   if (simple[u.role]) return el('span', { class: 'badge ' + simple[u.role] }, SIMPLE_ROLE_LABEL[u.role] || u.role);
-  const map = { graphic: 'green', video: 'amber', uiux: 'purple' };
+  const map = { graphic: 'green', video: 'amber', video_lead: 'orange', uiux: 'purple' };
   return el('span', { class: 'badge ' + (map[u.editor_type] || 'green') }, editorTypeLabel(u.editor_type));
 }
 // Các vai trò user, mã hóa role[:editor_type]
@@ -100,13 +104,14 @@ const USER_ROLES = [
   ['hr', 'HR'],
   ['editor:graphic', 'Graphic Designer'],
   ['editor:video', 'Video Editor'],
+  ['editor:video_lead', 'Video Editor Lead'],
   ['editor:uiux', 'UI/UX Designer'],
   ['admin', 'Admin'],
 ];
 function userRoleValue(u) {
   if (!u) return 'ua';
   if (u.role === 'editor') {
-    const t = ['graphic', 'video', 'uiux'].includes(u.editor_type) ? u.editor_type : 'graphic';
+    const t = ['graphic', 'video', 'video_lead', 'uiux'].includes(u.editor_type) ? u.editor_type : 'graphic';
     return 'editor:' + t;
   }
   return u.role;
@@ -208,12 +213,13 @@ const NAV = {
     ['#/orders', '📋', 'Order được giao'],
   ],
 };
-// ASO/PO/HR: xem tổng quan + danh sách order (chỉ đọc)
-const VIEWER_NAV = [
+// ASO/PO/HR: giống UA — tạo order + xem order của mình
+const ORDERER_NAV = [
   ['#/dashboard', '📊', 'Tổng quan'],
-  ['#/orders', '📋', 'Danh sách Order'],
+  ['#/new', '➕', 'Tạo Order'],
+  ['#/orders', '📋', 'Order của tôi'],
 ];
-['aso', 'po', 'hr'].forEach(r => { NAV[r] = VIEWER_NAV; });
+['aso', 'po', 'hr'].forEach(r => { NAV[r] = ORDERER_NAV; });
 
 function renderShell() {
   const app = document.getElementById('app');
@@ -293,27 +299,8 @@ function setTitle(t) { const n = document.getElementById('page-title'); if (n) n
 async function viewDashboard(c) {
   setTitle('Tổng quan');
   if (State.user.role === 'admin') return dashboardAdmin(c);
-  if (State.user.role === 'ua') return dashboardUA(c);
   if (State.user.role === 'editor') return dashboardEditor(c);
-  return dashboardViewer(c);
-}
-
-// Dashboard cho ASO/PO/HR (chỉ đọc)
-async function dashboardViewer(c) {
-  const orders = await api('/orders');
-  c.innerHTML = '';
-  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name)));
-  const cnt = (s) => orders.filter(o => o.status === s).length;
-  c.appendChild(el('div', { class: 'stat-grid' },
-    statCard('Tổng order', orders.length, '📋'),
-    statCard('Hoàn thành', cnt('Hoàn thành'), '✅'),
-    statCard('Đang làm', cnt('Đang làm'), '🔨'),
-    statCard('Chờ làm', cnt('Chờ làm'), '⏳'),
-  ));
-  c.appendChild(chartCard('Order theo trạng thái', 'v-status'));
-  const byStatus = {};
-  orders.forEach(o => { byStatus[o.status] = (byStatus[o.status] || 0) + 1; });
-  setTimeout(() => drawPie('v-status', Object.keys(byStatus), Object.values(byStatus)), 0);
+  return dashboardOrderer(c);
 }
 
 function rangeQuery(days) {
@@ -360,30 +347,34 @@ async function dashboardAdmin(c) {
   }, 0);
 }
 
-async function dashboardUA(c) {
-  const q = rangeQuery(30);
-  const rep = await api('/reports/ua?' + q);
+// Dashboard cho người order (UA/ASO/PO/HR) — tính từ order của chính mình
+async function dashboardOrderer(c) {
   const orders = await api('/orders');
-  const mine = rep.perUser[0] || { total_orders: 0, done_orders: 0, total_points: 0 };
   c.innerHTML = '';
-  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name), el('span', { class: 'spacer' }), el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order mới')));
+  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name),
+    el('span', { class: 'spacer' }), el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order mới')));
 
-  const pending = orders.filter(o => o.status !== 'Hoàn thành' && o.status !== 'Hủy').length;
+  const cnt = (s) => orders.filter(o => o.status === s).length;
   c.appendChild(el('div', { class: 'stat-grid' },
-    statCard('Order đã tạo (30N)', mine.total_orders || 0, '📋'),
-    statCard('Đã hoàn thành', mine.done_orders || 0, '✅'),
-    statCard('Điểm tích lũy', fmtNum(mine.total_points), '⭐'),
-    statCard('Đang chờ/làm', pending, '⏳'),
+    statCard('Tổng order đã tạo', orders.length, '📋'),
+    statCard('Hoàn thành', cnt('Hoàn thành'), '✅'),
+    statCard('Đợi submit', cnt('Đợi submit'), '📤'),
+    statCard('Đang chờ/làm', orders.filter(o => o.status === 'Chờ làm' || o.status === 'Đang làm').length, '⏳'),
   ));
 
   const g = el('div', { class: 'grid-2' });
-  g.appendChild(chartCard('Order theo ngày', 'ch-tl'));
+  g.appendChild(chartCard('Order theo trạng thái', 'ch-st'));
   g.appendChild(chartCard('Breakdown theo loại order', 'ch-type'));
   c.appendChild(g);
 
+  const byStatus = {}, byType = {};
+  orders.forEach(o => {
+    byStatus[o.status] = (byStatus[o.status] || 0) + 1;
+    const k = o.order_type_name || '—'; byType[k] = (byType[k] || 0) + 1;
+  });
   setTimeout(() => {
-    drawLine('ch-tl', rep.timeline.map(t => fmtDate(t.day)), rep.timeline.map(t => t.cnt));
-    drawBar('ch-type', rep.byType.slice(0, 10).map(t => t.name), rep.byType.slice(0, 10).map(t => t.cnt), 'Số order');
+    drawPie('ch-st', Object.keys(byStatus), Object.values(byStatus));
+    drawBar('ch-type', Object.keys(byType).slice(0, 10), Object.values(byType).slice(0, 10), 'Số order');
   }, 0);
 }
 
@@ -448,18 +439,19 @@ let orderFilters = {};
 
 async function viewOrders(c) {
   const role = State.user.role;
-  setTitle(role === 'editor' ? 'Order được giao' : role === 'ua' ? 'Order của tôi' : 'Quản lý Order');
+  const title = role === 'editor' ? 'Order được giao' : isOrdererRole(role) ? 'Order của tôi' : 'Quản lý Order';
+  setTitle(title);
 
   const qs = new URLSearchParams(orderFilters).toString();
   const orders = await api('/orders' + (qs ? '?' + qs : ''));
 
   c.innerHTML = '';
   const head = el('div', { class: 'page-head' },
-    el('h1', {}, role === 'editor' ? 'Order được giao' : role === 'ua' ? 'Order của tôi' : 'Quản lý Order'),
+    el('h1', {}, title),
     el('span', { class: 'muted' }, '· ' + orders.length + ' order'),
     el('span', { class: 'spacer' }),
   );
-  if (role === 'ua') head.appendChild(el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order'));
+  if (isOrdererRole(role)) head.appendChild(el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order'));
   if (role === 'admin') head.appendChild(el('button', { class: 'btn primary', onclick: () => openOrderForm(null) }, '➕ Tạo order'));
   c.appendChild(head);
 
@@ -572,13 +564,18 @@ async function openOrderDetail(id) {
     catch (e) { toast(e.message, 'err'); }
   });
 
+  const isLead = isLeadUser(State.user);
   const footer = [];
-  if (role === 'editor' && o.editor_id === State.user.id) footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openEditorUpdate(o); } }, '✏️ Cập nhật tiến độ'));
+  // Lead/Admin: giao việc & submit khi order đang "Đợi submit"
+  if ((isLead || role === 'admin') && o.status === 'Đợi submit') {
+    footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openSubmitDialog(o); } }, '✅ Giao việc & Submit'));
+  }
+  if (role === 'editor' && o.editor_id === State.user.id && o.status !== 'Đợi submit') footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openEditorUpdate(o); } }, '✏️ Cập nhật tiến độ'));
   if (role === 'admin') {
     if (canCancel) footer.push(el('button', { class: 'btn danger', onclick: cancelOrder }, '🚫 Hủy order'));
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openOrderForm(o); } }, '✏️ Sửa'));
   }
-  if (role === 'ua' && o.ua_id === State.user.id) {
+  if (isOrdererRole(role) && o.ua_id === State.user.id) {
     if (o.status === 'Hoàn thành') footer.push(el('button', { class: 'btn', onclick: async () => { await api('/orders/' + o.id, { method: 'PUT', body: { status: 'Yêu cầu sửa' } }); toast('Đã gửi yêu cầu sửa'); closeM(); route(); } }, '↩️ Yêu cầu sửa'));
     if (canCancel) footer.push(el('button', { class: 'btn danger', onclick: cancelOrder }, '🚫 Hủy order'));
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openOrderForm(o); } }, '✏️ Sửa'));
@@ -608,6 +605,26 @@ function openEditorUpdate(o) {
     closeM(); route();
   };
   const closeM = openModal({ title: 'Cập nhật: ' + o.order_code, body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '💾 Lưu')] });
+}
+
+/* ---- Lead/Admin: giao việc & submit ---- */
+function openSubmitDialog(o) {
+  const meta = State.meta;
+  // chỉ cho chọn editor cùng loại creative (ảnh -> designer/uiux, video -> video/lead) + tất cả nếu muốn
+  const editorSel = el('select', {}, el('option', { value: '' }, '— Chọn người làm —'),
+    meta.editors.map(u => el('option', { value: u.id, selected: o.editor_id === u.id }, u.full_name + ' (' + editorTypeLabel(u.editor_type) + ')')));
+  const body = el('div', {},
+    el('p', { class: 'hint', style: 'margin-bottom:10px' }, 'Chọn người thực hiện rồi bấm Submit. Sau khi submit, order chuyển sang "Chờ làm" và người được giao sẽ nhận được.'),
+    el('div', { class: 'field' }, el('label', {}, 'Giao cho'), editorSel),
+  );
+  const submit = async () => {
+    if (!editorSel.value) return toast('Vui lòng chọn người làm', 'err');
+    try {
+      await api('/orders/' + o.id, { method: 'PUT', body: { editor_id: Number(editorSel.value), status: 'Chờ làm' } });
+      toast('Đã giao việc & submit'); closeM(); route();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const closeM = openModal({ title: 'Giao việc: ' + o.order_code, body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: submit }, '✅ Submit')] });
 }
 
 /* ============================ Order form (create/edit) ============================ */
@@ -1144,6 +1161,10 @@ function reportRangeQuery() {
   if (reportRange === 'last_month') return monthRange(-1);
   return rangeQuery(reportRange);
 }
+function reportRangeDates() {
+  const qs = new URLSearchParams(reportRangeQuery());
+  return { from: qs.get('from'), to: qs.get('to') };
+}
 
 async function viewReports(c) {
   setTitle('Báo cáo');
@@ -1153,7 +1174,16 @@ async function viewReports(c) {
     [[7, '7 ngày'], [30, '30 ngày'], [90, '90 ngày'], [365, '1 năm'], ['this_month', 'Tháng này'], ['last_month', 'Tháng trước'], ['custom', 'Tùy chọn…']]
       .map(([v, t]) => el('option', { value: v, selected: String(reportRange) === String(v) }, t)));
 
-  const head = el('div', { class: 'page-head' }, el('h1', {}, 'Báo cáo hiệu suất'), el('span', { class: 'spacer' }), rangeSel);
+  // Hiển thị khoảng thời gian cụ thể đang xem
+  const { from, to } = reportRangeDates();
+  const rangeText = (reportRange === 'custom' && (!reportFrom || !reportTo))
+    ? 'Hãy chọn khoảng ngày'
+    : '📅 ' + fmtDate(from) + ' → ' + fmtDate(to);
+
+  const head = el('div', { class: 'page-head' }, el('h1', {}, 'Báo cáo hiệu suất'),
+    el('span', { class: 'spacer' }),
+    el('span', { class: 'muted', style: 'margin-right:10px' }, rangeText),
+    rangeSel);
   c.appendChild(head);
 
   if (reportRange === 'custom') {

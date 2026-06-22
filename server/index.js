@@ -18,8 +18,11 @@ const PORT = process.env.PORT || 3000;
 
 // ---- Constants (metadata cho frontend) -----------------------------------
 
-const STATUSES = ['Chờ làm', 'Đang làm', 'Hoàn thành', 'Yêu cầu sửa', 'Hủy'];
+const STATUSES = ['Đợi submit', 'Chờ làm', 'Đang làm', 'Hoàn thành', 'Yêu cầu sửa', 'Hủy'];
 const APP_STATUSES = ['Đang chạy', 'Đợi bàn giao', 'Dừng'];
+// Các vai trò "người order": tạo order + xem order của mình
+const ORDERER_ROLES = ['ua', 'aso', 'po', 'hr'];
+const isLeadUser = (u) => u.role === 'editor' && u.editor_type === 'video_lead';
 
 // ---- Helpers -------------------------------------------------------------
 
@@ -152,8 +155,17 @@ app.get('/api/orders', authenticate, (req, res) => {
   const params = [];
 
   // Giới hạn theo role
-  if (req.user.role === 'ua') { where.push('o.ua_id = ?'); params.push(req.user.id); }
-  else if (req.user.role === 'editor') { where.push('o.editor_id = ?'); params.push(req.user.id); }
+  if (ORDERER_ROLES.includes(req.user.role)) { where.push('o.ua_id = ?'); params.push(req.user.id); }
+  else if (req.user.role === 'editor') {
+    if (isLeadUser(req.user)) {
+      // Lead: order của mình + tất cả order đang "Đợi submit"
+      where.push('(o.editor_id = ? OR o.status = ?)'); params.push(req.user.id, 'Đợi submit');
+    } else {
+      // Editor thường: chỉ order được giao và đã submit
+      where.push('o.editor_id = ? AND o.status != ?'); params.push(req.user.id, 'Đợi submit');
+    }
+  }
+  // admin: xem tất cả
 
   const q = req.query;
   if (q.ua_id) { where.push('o.ua_id = ?'); params.push(q.ua_id); }
@@ -180,12 +192,12 @@ app.get('/api/orders', authenticate, (req, res) => {
 app.get('/api/orders/:id', authenticate, (req, res) => {
   const o = getOrder(req.params.id);
   if (!o) return res.status(404).json({ error: 'Không tìm thấy order' });
-  if (req.user.role === 'ua' && o.ua_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
-  if (req.user.role === 'editor' && o.editor_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
+  if (ORDERER_ROLES.includes(req.user.role) && o.ua_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
+  if (req.user.role === 'editor' && !isLeadUser(req.user) && o.editor_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
   res.json(o);
 });
 
-app.post('/api/orders', authenticate, requireRole('ua', 'admin'), (req, res) => {
+app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'hr'), (req, res) => {
   const b = req.body || {};
   const type = db.prepare('SELECT * FROM order_types WHERE id = ?').get(b.order_type_id);
   if (!type) return res.status(400).json({ error: 'Loại order không hợp lệ' });
@@ -211,7 +223,7 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin'), (req, res) => 
     code, category, b.app_id || null, appName, partner, b.link_figma || '',
     b.order_date || todayStr(), b.objective || '', type.id, uaId,
     b.description || '', b.ref_link || '', b.size || '', b.note_request || '',
-    editorId, 'Chờ làm', 0);
+    editorId, 'Đợi submit', 0);
 
   res.json(getOrder(r.lastInsertRowid));
 });
@@ -221,10 +233,12 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
   if (!o) return res.status(404).json({ error: 'Không tìm thấy order' });
   const b = req.body || {};
   const role = req.user.role;
+  const isOrderer = ORDERER_ROLES.includes(role);
+  const isLead = isLeadUser(req.user);
 
   // Quyền
-  if (role === 'ua' && o.ua_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
-  if (role === 'editor' && o.editor_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
+  if (isOrderer && o.ua_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
+  if (role === 'editor' && !isLead && o.editor_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
 
   const upd = {};
 
@@ -234,14 +248,17 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
       'order_type_id', 'ua_id', 'description', 'ref_link', 'size', 'note_request',
       'editor_id', 'status', 'drive_link', 'youtube_link', 'note'];
     for (const f of fields) if (f in b) upd[f] = b[f];
-  } else if (role === 'ua') {
-    // UA sửa thông tin yêu cầu của order mình tạo
+  } else if (isOrderer) {
+    // Người order sửa thông tin yêu cầu của order mình tạo
     const fields = ['app_id', 'app_name', 'partner', 'link_figma', 'order_date', 'objective',
       'order_type_id', 'description', 'ref_link', 'size', 'note_request'];
     for (const f of fields) if (f in b) upd[f] = b[f];
-    // UA có thể yêu cầu sửa lại, hoặc Hủy order của mình
     if (b.status === 'Yêu cầu sửa') upd.status = 'Yêu cầu sửa';
     if (b.status === 'Hủy') upd.status = 'Hủy';
+  } else if (isLead) {
+    // Lead: giao việc (assign) + submit + cập nhật tiến độ
+    const fields = ['editor_id', 'status', 'drive_link', 'youtube_link', 'note'];
+    for (const f of fields) if (f in b) upd[f] = b[f];
   } else if (role === 'editor') {
     // Editor cập nhật tiến độ & output
     const fields = ['status', 'drive_link', 'youtube_link', 'note'];
