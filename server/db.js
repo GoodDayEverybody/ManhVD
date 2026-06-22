@@ -133,6 +133,30 @@ function init() {
   const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col);
   if (!hasColumn('order_types', 'note')) db.exec('ALTER TABLE order_types ADD COLUMN note TEXT');
   if (!hasColumn('apps', 'figma_link')) db.exec('ALTER TABLE apps ADD COLUMN figma_link TEXT');
+
+  // Migration: gỡ ràng buộc CHECK cũ trên users.role (để cho phép aso/po/hr)
+  const urow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
+  if (urow && /check/i.test(urow.sql)) {
+    db.exec('PRAGMA foreign_keys=OFF');
+    db.exec(`
+      CREATE TABLE users_new (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        username      TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        full_name     TEXT NOT NULL,
+        role          TEXT NOT NULL,
+        editor_type   TEXT,
+        active        INTEGER NOT NULL DEFAULT 1,
+        created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+      );
+      INSERT INTO users_new (id,username,password_hash,full_name,role,editor_type,active,created_at)
+        SELECT id,username,password_hash,full_name,role,editor_type,active,
+               COALESCE(created_at, datetime('now','localtime')) FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_new RENAME TO users;
+    `);
+    db.exec('PRAGMA foreign_keys=ON');
+  }
 }
 
 // Sinh mã order kế tiếp. label: 'V' cho video, 'A' cho ảnh.

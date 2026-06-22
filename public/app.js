@@ -918,14 +918,16 @@ function openUserForm(u, presetRole) {
   const username = el('input', { value: u ? u.username : '', placeholder: 'username (chữ thường)', disabled: !!u });
   // presetRole: 'ua' -> mặc định UA; 'editor' -> mặc định Graphic Designer
   const defVal = u ? userRoleValue(u) : (presetRole === 'editor' ? 'editor:graphic' : presetRole === 'ua' ? 'ua' : 'ua');
+  const isAdminAcc = u && u.role === 'admin';
   const role = el('select', {}, USER_ROLES.map(([v, t]) => el('option', { value: v, selected: v === defVal }, t)));
+  if (isAdminAcc) role.disabled = true;
   const pass = el('input', { type: 'text', placeholder: u ? 'Để trống nếu không đổi' : 'Mặc định 123456' });
   const active = el('select', {}, el('option', { value: '1', selected: !u || u.active }, 'Hoạt động'), el('option', { value: '0', selected: u && !u.active }, 'Khóa'));
 
   const body = el('div', {},
     el('div', { class: 'field' }, el('label', {}, 'Họ tên *'), fullName),
     el('div', { class: 'field' }, el('label', {}, 'Username *'), username, u ? el('div', { class: 'hint' }, 'Không thể đổi username') : null),
-    el('div', { class: 'form-row' }, el('div', { class: 'field' }, el('label', {}, 'Vai trò'), role),
+    el('div', { class: 'form-row' }, el('div', { class: 'field' }, el('label', {}, 'Vai trò'), role, isAdminAcc ? el('div', { class: 'hint' }, 'Tài khoản Admin không thể đổi vai trò') : null),
       el('div', { class: 'field' }, el('label', {}, 'Mật khẩu'), pass)),
     u ? el('div', { class: 'field' }, el('label', {}, 'Trạng thái'), active) : null,
   );

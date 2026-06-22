@@ -321,9 +321,11 @@ app.put('/api/users/:id', authenticate, requireRole('admin'), (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.status(404).json({ error: 'Không tìm thấy user' });
   const b = req.body || {};
+  // Tài khoản Admin luôn giữ vai trò Admin, không cho đổi
+  const newRole = u.role === 'admin' ? 'admin' : (b.role ?? u.role);
   db.prepare('UPDATE users SET full_name=?, role=?, editor_type=?, active=? WHERE id=?').run(
-    b.full_name ?? u.full_name, b.role ?? u.role,
-    (b.role ?? u.role) === 'editor' ? (b.editor_type ?? u.editor_type ?? 'graphic') : null,
+    b.full_name ?? u.full_name, newRole,
+    newRole === 'editor' ? (b.editor_type ?? u.editor_type ?? 'graphic') : null,
     b.active != null ? (b.active ? 1 : 0) : u.active, u.id);
   if (b.password) db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(b.password, 10), u.id);
   res.json(db.prepare('SELECT id, username, full_name, role, editor_type, active FROM users WHERE id = ?').get(u.id));
