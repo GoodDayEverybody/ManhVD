@@ -1,7 +1,7 @@
 'use strict';
 
 const bcrypt = require('bcryptjs');
-const { db, init, nextOrderCode } = require('./db');
+const { db, init, nextOrderCode, tx } = require('./db');
 
 init();
 
@@ -36,7 +36,7 @@ function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 // ---- Wipe (seed lại từ đầu) ----------------------------------------------
 
-const wipe = db.transaction(() => {
+tx(() => {
   db.exec(`
     DELETE FROM orders;
     DELETE FROM order_types;
@@ -46,7 +46,6 @@ const wipe = db.transaction(() => {
     DELETE FROM sqlite_sequence;
   `);
 });
-wipe();
 
 const DEFAULT_PASSWORD = '123456';
 const hash = (pw) => bcrypt.hashSync(pw, 10);
@@ -189,7 +188,7 @@ const uaIdList = Object.values(uaIds);
 const designerIds = editorById.filter(e => e.type === 'designer' || e.type === 'both').map(e => e.id);
 const videoEditorIds = editorById.filter(e => e.type === 'video' || e.type === 'both').map(e => e.id);
 
-const seedOrders = db.transaction((count) => {
+const seedOrders = (count) => tx(() => {
   for (let i = 0; i < count; i++) {
     const isVideo = Math.random() < 0.45;
     const category = isVideo ? 'video' : 'image';

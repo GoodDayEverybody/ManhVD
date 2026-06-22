@@ -2,7 +2,24 @@
 
 const path = require('path');
 const fs = require('fs');
-const Database = require('better-sqlite3');
+
+// Tắt cảnh báo "experimental" của node:sqlite (cosmetic, không ảnh hưởng)
+const _emitWarning = process.emitWarning.bind(process);
+process.emitWarning = (warning, ...args) => {
+  const type = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].type);
+  if (type === 'ExperimentalWarning' || (typeof warning === 'string' && /SQLite is an experimental/.test(warning))) return;
+  return _emitWarning(warning, ...args);
+};
+
+// Dùng SQLite tích hợp sẵn trong Node.js (>= 22.5) -> KHÔNG cần biên dịch native
+let DatabaseSync;
+try {
+  ({ DatabaseSync } = require('node:sqlite'));
+} catch (e) {
+  console.error('\n❌ Phiên bản Node.js của bạn chưa hỗ trợ node:sqlite.');
+  console.error('   Hãy cài Node.js bản LTS mới (>= 22.5, khuyến nghị 22 hoặc 24) tại https://nodejs.org\n');
+  process.exit(1);
+}
 
 // Lưu database trong thư mục data/ ở gốc dự án
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -11,10 +28,17 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const DB_PATH = path.join(DATA_DIR, 'app.db');
-const db = new Database(DB_PATH);
+const db = new DatabaseSync(DB_PATH);
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA foreign_keys = ON');
+
+// Helper transaction (node:sqlite không có db.transaction như better-sqlite3)
+function tx(fn) {
+  db.exec('BEGIN');
+  try { const r = fn(); db.exec('COMMIT'); return r; }
+  catch (e) { db.exec('ROLLBACK'); throw e; }
+}
 
 function init() {
   db.exec(`
@@ -108,4 +132,4 @@ function nextOrderCode(label) {
   return label + value;
 }
 
-module.exports = { db, init, nextOrderCode, DB_PATH };
+module.exports = { db, init, nextOrderCode, tx, DB_PATH };
