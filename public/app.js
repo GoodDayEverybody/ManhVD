@@ -42,6 +42,19 @@ function toast(msg, type = 'ok') {
 }
 
 function fmtDate(s) { return s ? String(s).slice(0, 10).split('-').reverse().join('/') : ''; }
+// dd/mm/yyyy -> yyyy-mm-dd (chuẩn để lọc/lưu); trả null nếu sai
+function parseDMY(s) {
+  const m = String(s).trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if (!m) return null;
+  const d = +m[1], mo = +m[2], y = +m[3];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+// yyyy-mm-dd -> dd/mm/yyyy để hiển thị trong ô nhập
+function toDMY(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+}
 function fmtNum(n) { return (Math.round((n || 0) * 100) / 100).toLocaleString('vi-VN'); }
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
@@ -388,7 +401,7 @@ async function viewOrders(c) {
   const table = el('table', {},
     el('thead', {}, el('tr', {},
       el('th', {}, 'Loại'), el('th', {}, 'Mã'), el('th', {}, 'App / Loại order'), el('th', {}, 'Mục tiêu'),
-      showUA ? el('th', {}, 'Người order') : null, el('th', {}, 'Editor'), el('th', {}, 'Trạng thái'), el('th', {}, 'Ngày'), el('th', {}, 'Điểm'),
+      showUA ? el('th', {}, 'Người order') : null, el('th', {}, 'Người làm'), el('th', {}, 'Trạng thái'), el('th', {}, 'Ngày'), el('th', {}, 'Điểm'),
     )),
     el('tbody', {}, orders.map(o => {
       const tr = el('tr', { style: 'cursor:pointer', onclick: () => openOrderDetail(o.id) },
@@ -420,10 +433,10 @@ function renderOrderFilters() {
   wrap.appendChild(filterSelect('category', 'Loại', [['', 'Tất cả'], ['image', 'Ảnh'], ['video', 'Video']], apply));
   if (role === 'admin') {
     wrap.appendChild(filterSelect('ua_id', 'Người order', [['', 'Tất cả'], ...meta.uas.map(u => [u.id, u.full_name])], apply));
-    wrap.appendChild(filterSelect('editor_id', 'Editor', [['', 'Tất cả'], ['none', '— Chưa giao —'], ...meta.editors.map(u => [u.id, u.full_name])], apply));
+    wrap.appendChild(filterSelect('editor_id', 'Người làm', [['', 'Tất cả'], ['none', '— Chưa giao —'], ...meta.editors.map(u => [u.id, u.full_name])], apply));
   }
-  wrap.appendChild(filterInput('from', 'Từ ngày', '', apply, 'date'));
-  wrap.appendChild(filterInput('to', 'Đến ngày', '', apply, 'date'));
+  wrap.appendChild(filterDate('from', 'Từ ngày', apply));
+  wrap.appendChild(filterDate('to', 'Đến ngày', apply));
   if (Object.keys(orderFilters).length)
     wrap.appendChild(el('button', { class: 'btn sm', onclick: () => { orderFilters = {}; route(); } }, '✕ Xóa lọc'));
   return wrap;
@@ -439,6 +452,20 @@ function filterSelect(key, label, options, apply) {
   const sel = el('select', {}, options.map(([v, t]) => el('option', { value: v, selected: String(orderFilters[key] || '') === String(v) }, t)));
   sel.addEventListener('change', () => { if (sel.value) orderFilters[key] = sel.value; else delete orderFilters[key]; apply(); });
   return el('div', { class: 'field' }, el('label', {}, label), sel);
+}
+// Ô nhập ngày dạng dd/mm/yyyy (Ngày/Tháng/Năm)
+function filterDate(key, label, apply) {
+  const inp = el('input', { type: 'text', placeholder: 'dd/mm/yyyy', inputmode: 'numeric', value: toDMY(orderFilters[key]) });
+  const commit = () => {
+    const v = inp.value.trim();
+    if (!v) { delete orderFilters[key]; apply(); return; }
+    const iso = parseDMY(v);
+    if (iso) { orderFilters[key] = iso; apply(); }
+    else { toast('Ngày không hợp lệ. Nhập dạng dd/mm/yyyy, vd: 31/12/2026', 'err'); }
+  };
+  inp.addEventListener('change', commit);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); });
+  return el('div', { class: 'field' }, el('label', {}, label), inp);
 }
 
 /* ============================ Order detail ============================ */
