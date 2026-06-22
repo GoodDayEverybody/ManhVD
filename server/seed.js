@@ -206,7 +206,7 @@ const insOrder = db.prepare(`
 
 const SIZES_IMAGE = ['1200x628', '1080x1080', '1080x1920', '1200x1500', '512x512', '1200x627'];
 const SIZES_VIDEO = ['1080x1920', '1920x1080', '720x1280', '1080x1080'];
-const STATUSES = ['Chờ làm', 'Đang làm', 'Đã xong', 'Đã xong', 'Yêu cầu sửa'];
+const STATUSES = ['Chờ làm', 'Đang làm', 'Hoàn thành', 'Hoàn thành', 'Yêu cầu sửa', 'Hủy'];
 const OBJECTIVES_IMG = ['Ảnh quảng cáo', 'Localize Ảnh quảng cáo', 'Resize + Thay outro', 'Bộ ảnh mới'];
 const OBJECTIVES_VID = ['Video quảng cáo', 'Video cắt dựng', 'Resize + Thay outro', 'Localize Video'];
 
@@ -224,7 +224,7 @@ const seedOrders = (count) => tx(() => {
     const uaId = pick(uaIdList);
     const status = pick(STATUSES);
     const orderDate = daysAgo(Math.floor(Math.random() * 45));
-    const done = status === 'Đã xong';
+    const done = status === 'Hoàn thành';
     const assigned = Math.random() < 0.85;
     const editorId = assigned
       ? (isVideo ? pick(videoEditorIds) : pick(designerIds))

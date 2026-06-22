@@ -67,7 +67,7 @@ function fmtNum(n) { return (Math.round((n || 0) * 100) / 100).toLocaleString('v
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 function statusBadge(s) {
-  const map = { 'Chờ làm': 'gray', 'Đang làm': 'blue', 'Đã xong': 'green', 'Yêu cầu sửa': 'red' };
+  const map = { 'Chờ làm': 'amber', 'Đang làm': 'orange', 'Hoàn thành': 'green', 'Yêu cầu sửa': 'red', 'Hủy': 'darkred' };
   return el('span', { class: 'badge ' + (map[s] || 'gray') }, s);
 }
 function appStatusBadge(s) {
@@ -84,16 +84,20 @@ function appLabel(o) {
 function editorTypeLabel(t) {
   return ({ graphic: 'Graphic Designer', video: 'Video Editor', uiux: 'UI/UX Designer', designer: 'Graphic Designer', both: 'Graphic+Video' })[t] || t || '';
 }
+const SIMPLE_ROLE_LABEL = { ua: 'UA', aso: 'ASO', po: 'PO', hr: 'HR', admin: 'Admin' };
 // Badge vai trò có màu riêng cho dễ phân biệt
 function roleBadge(u) {
-  if (u.role === 'admin') return el('span', { class: 'badge red' }, 'Admin');
-  if (u.role === 'ua') return el('span', { class: 'badge blue' }, 'UA');
+  const simple = { admin: 'red', ua: 'blue', aso: 'teal', po: 'indigo', hr: 'pink' };
+  if (simple[u.role]) return el('span', { class: 'badge ' + simple[u.role] }, SIMPLE_ROLE_LABEL[u.role] || u.role);
   const map = { graphic: 'green', video: 'amber', uiux: 'purple' };
   return el('span', { class: 'badge ' + (map[u.editor_type] || 'green') }, editorTypeLabel(u.editor_type));
 }
-// 5 vai trò user, mã hóa role[:editor_type]
+// Các vai trò user, mã hóa role[:editor_type]
 const USER_ROLES = [
   ['ua', 'UA'],
+  ['aso', 'ASO'],
+  ['po', 'PO'],
+  ['hr', 'HR'],
   ['editor:graphic', 'Graphic Designer'],
   ['editor:video', 'Video Editor'],
   ['editor:uiux', 'UI/UX Designer'],
@@ -102,7 +106,7 @@ const USER_ROLES = [
 function userRoleValue(u) {
   if (!u) return 'ua';
   if (u.role === 'editor') {
-    const t = ['graphic', 'video', 'uiux'].includes(u.editor_type) ? u.editor_type : (u.editor_type === 'video' ? 'video' : 'graphic');
+    const t = ['graphic', 'video', 'uiux'].includes(u.editor_type) ? u.editor_type : 'graphic';
     return 'editor:' + t;
   }
   return u.role;
@@ -204,6 +208,12 @@ const NAV = {
     ['#/orders', '📋', 'Order được giao'],
   ],
 };
+// ASO/PO/HR: xem tổng quan + danh sách order (chỉ đọc)
+const VIEWER_NAV = [
+  ['#/dashboard', '📊', 'Tổng quan'],
+  ['#/orders', '📋', 'Danh sách Order'],
+];
+['aso', 'po', 'hr'].forEach(r => { NAV[r] = VIEWER_NAV; });
 
 function renderShell() {
   const app = document.getElementById('app');
@@ -284,7 +294,26 @@ async function viewDashboard(c) {
   setTitle('Tổng quan');
   if (State.user.role === 'admin') return dashboardAdmin(c);
   if (State.user.role === 'ua') return dashboardUA(c);
-  return dashboardEditor(c);
+  if (State.user.role === 'editor') return dashboardEditor(c);
+  return dashboardViewer(c);
+}
+
+// Dashboard cho ASO/PO/HR (chỉ đọc)
+async function dashboardViewer(c) {
+  const orders = await api('/orders');
+  c.innerHTML = '';
+  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name)));
+  const cnt = (s) => orders.filter(o => o.status === s).length;
+  c.appendChild(el('div', { class: 'stat-grid' },
+    statCard('Tổng order', orders.length, '📋'),
+    statCard('Hoàn thành', cnt('Hoàn thành'), '✅'),
+    statCard('Đang làm', cnt('Đang làm'), '🔨'),
+    statCard('Chờ làm', cnt('Chờ làm'), '⏳'),
+  ));
+  c.appendChild(chartCard('Order theo trạng thái', 'v-status'));
+  const byStatus = {};
+  orders.forEach(o => { byStatus[o.status] = (byStatus[o.status] || 0) + 1; });
+  setTimeout(() => drawPie('v-status', Object.keys(byStatus), Object.values(byStatus)), 0);
 }
 
 function rangeQuery(days) {
@@ -304,7 +333,7 @@ async function dashboardAdmin(c) {
     statCard('Tổng order', summary.total_orders, '📋'),
     statCard('Tổng điểm', fmtNum(summary.total_points), '⭐'),
     statCard('Chưa giao', summary.unassigned, '📭'),
-    statCard('Đã xong', (summary.byStatus.find(s => s.status === 'Đã xong') || {}).c || 0, '✅'),
+    statCard('Hoàn thành', (summary.byStatus.find(s => s.status === 'Hoàn thành') || {}).c || 0, '✅'),
   ));
 
   const g = el('div', { class: 'grid-2' });
@@ -339,7 +368,7 @@ async function dashboardUA(c) {
   c.innerHTML = '';
   c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name), el('span', { class: 'spacer' }), el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order mới')));
 
-  const pending = orders.filter(o => o.status !== 'Đã xong').length;
+  const pending = orders.filter(o => o.status !== 'Hoàn thành' && o.status !== 'Hủy').length;
   c.appendChild(el('div', { class: 'stat-grid' },
     statCard('Order đã tạo (30N)', mine.total_orders || 0, '📋'),
     statCard('Đã hoàn thành', mine.done_orders || 0, '✅'),
@@ -536,14 +565,22 @@ async function openOrderDetail(id) {
   if (o.youtube_link) add('Link Youtube', el('a', { href: o.youtube_link, target: '_blank' }, o.youtube_link));
   if (o.note) add('Note (Editor)', o.note);
 
+  // Chỉ Hủy được khi chưa Hoàn thành và chưa Hủy
+  const canCancel = o.status !== 'Hoàn thành' && o.status !== 'Hủy';
+  const cancelOrder = () => confirmDialog('Hủy order ' + o.order_code + '? (không thể hoàn tác)', async () => {
+    try { await api('/orders/' + o.id, { method: 'PUT', body: { status: 'Hủy' } }); toast('Đã hủy order'); closeM(); route(); }
+    catch (e) { toast(e.message, 'err'); }
+  });
+
   const footer = [];
   if (role === 'editor' && o.editor_id === State.user.id) footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openEditorUpdate(o); } }, '✏️ Cập nhật tiến độ'));
   if (role === 'admin') {
-    footer.push(el('button', { class: 'btn danger', onclick: () => confirmDialog('Xóa order ' + o.order_code + '?', async () => { await api('/orders/' + o.id, { method: 'DELETE' }); toast('Đã xóa'); closeM(); route(); }) }, '🗑 Xóa'));
-    footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openOrderForm(o); } }, '✏️ Sửa / Giao việc'));
+    if (canCancel) footer.push(el('button', { class: 'btn danger', onclick: cancelOrder }, '🚫 Hủy order'));
+    footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openOrderForm(o); } }, '✏️ Sửa'));
   }
   if (role === 'ua' && o.ua_id === State.user.id) {
-    if (o.status === 'Đã xong') footer.push(el('button', { class: 'btn', onclick: async () => { await api('/orders/' + o.id, { method: 'PUT', body: { status: 'Yêu cầu sửa' } }); toast('Đã gửi yêu cầu sửa'); closeM(); route(); } }, '↩️ Yêu cầu sửa'));
+    if (o.status === 'Hoàn thành') footer.push(el('button', { class: 'btn', onclick: async () => { await api('/orders/' + o.id, { method: 'PUT', body: { status: 'Yêu cầu sửa' } }); toast('Đã gửi yêu cầu sửa'); closeM(); route(); } }, '↩️ Yêu cầu sửa'));
+    if (canCancel) footer.push(el('button', { class: 'btn danger', onclick: cancelOrder }, '🚫 Hủy order'));
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openOrderForm(o); } }, '✏️ Sửa'));
   }
   footer.push(el('button', { class: 'btn', onclick: () => closeM() }, 'Đóng'));
@@ -1092,10 +1129,17 @@ let reportTab = 'ua';
 let reportRange = 30;          // số ngày, hoặc 'custom'
 let reportFrom = '', reportTo = '';
 
+function monthRange(offset) { // 0 = tháng này, -1 = tháng trước
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  return `from=${fmt(first)}&to=${fmt(last)}`;
+}
 function reportRangeQuery() {
-  if (reportRange === 'custom') {
-    return `from=${reportFrom || '2000-01-01'}&to=${reportTo || '2999-12-31'}`;
-  }
+  if (reportRange === 'custom') return `from=${reportFrom || '2000-01-01'}&to=${reportTo || '2999-12-31'}`;
+  if (reportRange === 'this_month') return monthRange(0);
+  if (reportRange === 'last_month') return monthRange(-1);
   return rangeQuery(reportRange);
 }
 
@@ -1103,8 +1147,8 @@ async function viewReports(c) {
   setTitle('Báo cáo');
   c.innerHTML = '';
 
-  const rangeSel = el('select', { onchange: (e) => { reportRange = e.target.value === 'custom' ? 'custom' : Number(e.target.value); route(); } },
-    [[7, '7 ngày'], [30, '30 ngày'], [90, '90 ngày'], [365, '1 năm'], ['custom', 'Tùy chọn…']]
+  const rangeSel = el('select', { onchange: (e) => { const v = e.target.value; reportRange = /^\d+$/.test(v) ? Number(v) : v; route(); } },
+    [[7, '7 ngày'], [30, '30 ngày'], [90, '90 ngày'], [365, '1 năm'], ['this_month', 'Tháng này'], ['last_month', 'Tháng trước'], ['custom', 'Tùy chọn…']]
       .map(([v, t]) => el('option', { value: v, selected: String(reportRange) === String(v) }, t)));
 
   const head = el('div', { class: 'page-head' }, el('h1', {}, 'Báo cáo hiệu suất'), el('span', { class: 'spacer' }), rangeSel);
@@ -1124,7 +1168,7 @@ async function viewReports(c) {
 
   const tabs = el('div', { class: 'tabs' },
     el('button', { class: reportTab === 'ua' ? 'active' : '', onclick: () => { reportTab = 'ua'; route(); } }, '👤 Hiệu suất UA'),
-    el('button', { class: reportTab === 'editor' ? 'active' : '', onclick: () => { reportTab = 'editor'; route(); } }, '🎨 Hiệu suất Editor'),
+    el('button', { class: reportTab === 'editor' ? 'active' : '', onclick: () => { reportTab = 'editor'; route(); } }, '🎨 Hiệu suất Creatives'),
   );
   c.appendChild(tabs);
   const box = el('div', {});
@@ -1143,7 +1187,7 @@ async function reportUA(box) {
   box.appendChild(el('div', { class: 'card card-pad', style: 'margin-top:16px' }, el('h3', {}, 'Order theo ngày'), el('div', { class: 'chart-box' }, el('canvas', { id: 'r-ua-tl' }))));
 
   const tbody = el('tbody', {});
-  if (!rep.perUser.length) tbody.appendChild(el('tr', {}, el('td', { colspan: 7, class: 'muted', style: 'text-align:center' }, 'Chưa có dữ liệu')));
+  if (!rep.perUser.length) tbody.appendChild(el('tr', {}, el('td', { colspan: 5, class: 'muted', style: 'text-align:center' }, 'Chưa có dữ liệu')));
   rep.perUser.forEach(u => {
     const caret = el('button', { class: 'btn sm ghost', title: 'Xem theo app' }, '▸');
     const tr = el('tr', {},
@@ -1152,7 +1196,6 @@ async function reportUA(box) {
       el('td', {}, u.image_qty || 0),
       el('td', {}, u.video_qty || 0),
       el('td', {}, u.done_orders),
-      el('td', {}, fmtNum(u.total_points)),
     );
     let detail = null;
     caret.addEventListener('click', async () => {
@@ -1167,13 +1210,13 @@ async function reportUA(box) {
           el('td', {}, a.cnt), el('td', {}, a.image_qty || 0), el('td', {}, a.video_qty || 0),
         )) : [el('tr', {}, el('td', { colspan: 4, class: 'muted' }, 'Không có'))]),
       );
-      detail = el('tr', { class: 'detail-row' }, el('td', { colspan: 6 }, el('div', { class: 'detail-pad' }, el('div', { class: 'muted', style: 'margin-bottom:6px; font-weight:600' }, '📱 Số lượng theo app — ' + u.full_name), sub)));
+      detail = el('tr', { class: 'detail-row' }, el('td', { colspan: 5 }, el('div', { class: 'detail-pad' }, el('div', { class: 'muted', style: 'margin-bottom:6px; font-weight:600' }, '📱 Số lượng theo app — ' + u.full_name), sub)));
       tr.after(detail);
     });
     tbody.appendChild(tr);
   });
   const table = el('table', {},
-    el('thead', {}, el('tr', {}, el('th', {}, 'UA'), el('th', {}, 'Tổng order'), el('th', {}, 'Số ảnh'), el('th', {}, 'Số video'), el('th', {}, 'Đã xong'), el('th', {}, 'Điểm'))),
+    el('thead', {}, el('tr', {}, el('th', {}, 'UA'), el('th', {}, 'Tổng order'), el('th', {}, 'Số ảnh'), el('th', {}, 'Số video'), el('th', {}, 'Hoàn thành'))),
     tbody);
   box.appendChild(el('div', { class: 'table-wrap', style: 'margin-top:16px' }, table));
 
@@ -1188,15 +1231,15 @@ async function reportEditor(box) {
   const rep = await api('/reports/editor?' + reportRangeQuery());
   box.innerHTML = '';
   const g = el('div', { class: 'grid-2' });
-  g.appendChild(chartCard('Điểm theo Editor', 'r-ed-pts'));
+  g.appendChild(chartCard('Điểm theo Creatives', 'r-ed-pts'));
   g.appendChild(chartCard('Order theo trạng thái', 'r-ed-st'));
   box.appendChild(g);
   box.appendChild(el('div', { class: 'card card-pad', style: 'margin-top:16px' }, el('h3', {}, 'Hoàn thành theo ngày'), el('div', { class: 'chart-box' }, el('canvas', { id: 'r-ed-tl' }))));
 
   const table = el('table', {},
-    el('thead', {}, el('tr', {}, el('th', {}, 'Editor'), el('th', {}, 'Loại'), el('th', {}, 'Được giao'), el('th', {}, 'Hoàn thành'), el('th', {}, 'Điểm'), el('th', {}, 'TG TB (ngày)'))),
+    el('thead', {}, el('tr', {}, el('th', {}, 'Creatives'), el('th', {}, 'Loại'), el('th', {}, 'Được giao'), el('th', {}, 'Hoàn thành'), el('th', {}, 'Điểm'), el('th', {}, 'TG TB (ngày)'))),
     el('tbody', {}, rep.perUser.length ? rep.perUser.map(u => el('tr', {}, el('td', {}, u.full_name),
-      el('td', {}, u.editor_type === 'video' ? 'Video' : u.editor_type === 'both' ? 'D+V' : 'Designer'),
+      el('td', {}, editorTypeLabel(u.editor_type)),
       el('td', {}, u.total_orders), el('td', {}, u.done_orders), el('td', {}, fmtNum(u.total_points)), el('td', {}, u.avg_days != null ? fmtNum(u.avg_days) : '—'))) :
       [el('tr', {}, el('td', { colspan: 6, class: 'muted', style: 'text-align:center' }, 'Chưa có dữ liệu'))]),
   );

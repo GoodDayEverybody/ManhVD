@@ -47,8 +47,8 @@ function init() {
       username      TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       full_name     TEXT NOT NULL,
-      role          TEXT NOT NULL CHECK (role IN ('admin','ua','editor')),
-      editor_type   TEXT,                       -- designer | video | both | NULL
+      role          TEXT NOT NULL,              -- admin | ua | editor | aso | po | hr
+      editor_type   TEXT,                       -- graphic | video | uiux | NULL
       active        INTEGER NOT NULL DEFAULT 1,
       created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
@@ -106,7 +106,7 @@ function init() {
       size          TEXT,                          -- Kích thước
       note_request  TEXT,                          -- Lưu ý (từ UA)
       editor_id     INTEGER REFERENCES users(id),  -- Người thực hiện
-      status        TEXT NOT NULL DEFAULT 'Chờ làm', -- Chờ làm | Đang làm | Đã xong | Yêu cầu sửa
+      status        TEXT NOT NULL DEFAULT 'Chờ làm', -- Chờ làm | Đang làm | Hoàn thành | Yêu cầu sửa | Hủy
       drive_link    TEXT,                          -- Link Drive output
       youtube_link  TEXT,
       completed_at  TEXT,                          -- Thời gian hoàn thành

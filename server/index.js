@@ -18,7 +18,7 @@ const PORT = process.env.PORT || 3000;
 
 // ---- Constants (metadata cho frontend) -----------------------------------
 
-const STATUSES = ['Chờ làm', 'Đang làm', 'Đã xong', 'Yêu cầu sửa'];
+const STATUSES = ['Chờ làm', 'Đang làm', 'Hoàn thành', 'Yêu cầu sửa', 'Hủy'];
 const APP_STATUSES = ['Đang chạy', 'Đợi bàn giao', 'Dừng'];
 
 // ---- Helpers -------------------------------------------------------------
@@ -239,8 +239,9 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
     const fields = ['app_id', 'app_name', 'partner', 'link_figma', 'order_date', 'objective',
       'order_type_id', 'description', 'ref_link', 'size', 'note_request'];
     for (const f of fields) if (f in b) upd[f] = b[f];
-    // UA có thể yêu cầu sửa lại bản đã giao
+    // UA có thể yêu cầu sửa lại, hoặc Hủy order của mình
     if (b.status === 'Yêu cầu sửa') upd.status = 'Yêu cầu sửa';
+    if (b.status === 'Hủy') upd.status = 'Hủy';
   } else if (role === 'editor') {
     // Editor cập nhật tiến độ & output
     const fields = ['status', 'drive_link', 'youtube_link', 'note'];
@@ -251,10 +252,15 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
   const typeId = upd.order_type_id ?? o.order_type_id;
   const type = db.prepare('SELECT * FROM order_types WHERE id = ?').get(typeId);
 
+  // Không cho Hủy order đã Hoàn thành
+  if (b.status === 'Hủy' && o.status === 'Hoàn thành') {
+    return res.status(400).json({ error: 'Order đã Hoàn thành thì không thể Hủy.' });
+  }
+
   // Tính điểm + thời gian hoàn thành theo trạng thái cuối
   const finalStatus = upd.status ?? o.status;
   if ('status' in upd || 'order_type_id' in upd) {
-    if (finalStatus === 'Đã xong') {
+    if (finalStatus === 'Hoàn thành') {
       upd.points = type ? type.points : o.points;
       upd.completed_at = o.completed_at || todayStr();
     } else {
@@ -279,11 +285,10 @@ app.patch('/api/orders/:id/assign', authenticate, requireRole('admin'), (req, re
   res.json(getOrder(o.id));
 });
 
-app.delete('/api/orders/:id', authenticate, (req, res) => {
+// Order không được xóa (chỉ Hủy). Giữ endpoint cho admin phòng trường hợp đặc biệt.
+app.delete('/api/orders/:id', authenticate, requireRole('admin'), (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!o) return res.status(404).json({ error: 'Không tìm thấy order' });
-  if (req.user.role === 'ua' && o.ua_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
-  if (req.user.role === 'editor') return res.status(403).json({ error: 'Không có quyền' });
   db.prepare('DELETE FROM orders WHERE id = ?').run(o.id);
   res.json({ ok: true });
 });
@@ -301,7 +306,7 @@ app.get('/api/users', authenticate, requireRole('admin'), (req, res) => {
 app.post('/api/users', authenticate, requireRole('admin'), (req, res) => {
   const b = req.body || {};
   if (!b.username || !b.full_name || !b.role) return res.status(400).json({ error: 'Thiếu thông tin' });
-  if (!['admin', 'ua', 'editor'].includes(b.role)) return res.status(400).json({ error: 'Role không hợp lệ' });
+  if (!['admin', 'ua', 'editor', 'aso', 'po', 'hr'].includes(b.role)) return res.status(400).json({ error: 'Role không hợp lệ' });
   try {
     const r = db.prepare('INSERT INTO users (username, password_hash, full_name, role, editor_type) VALUES (?,?,?,?,?)').run(
       String(b.username).trim().toLowerCase(), bcrypt.hashSync(b.password || '123456', 10),
@@ -455,7 +460,7 @@ app.get('/api/reports/ua', authenticate, requireRole('admin', 'ua'), (req, res) 
     FROM orders o
     JOIN users u ON u.id = o.ua_id
     LEFT JOIN order_types t ON t.id = o.order_type_id
-    WHERE o.order_date BETWEEN ? AND ?${uaFilter}
+    WHERE o.order_date BETWEEN ? AND ? AND u.role = 'ua' AND u.active = 1${uaFilter}
   `).all(...params);
 
   const perUserMap = {}, byTypeMap = {};
@@ -463,7 +468,7 @@ app.get('/api/reports/ua', authenticate, requireRole('admin', 'ua'), (req, res) 
     const qty = parseQty(r.quantity_note);
     const pu = perUserMap[r.ua_id] || (perUserMap[r.ua_id] = { id: r.ua_id, full_name: r.full_name, total_orders: 0, done_orders: 0, total_points: 0, image_qty: 0, video_qty: 0 });
     pu.total_orders++;
-    if (r.status === 'Đã xong') pu.done_orders++;
+    if (r.status === 'Hoàn thành') pu.done_orders++;
     pu.total_points += r.points || 0;
     if (r.category === 'video') pu.video_qty += qty; else pu.image_qty += qty;
     const key = (r.type_name || '—') + '|' + r.category;
@@ -517,13 +522,13 @@ app.get('/api/reports/editor', authenticate, requireRole('admin', 'editor'), (re
   const perUser = db.prepare(`
     SELECT u.id, u.full_name, u.editor_type,
            COUNT(o.id) AS total_orders,
-           SUM(CASE WHEN o.status='Đã xong' THEN 1 ELSE 0 END) AS done_orders,
+           SUM(CASE WHEN o.status='Hoàn thành' THEN 1 ELSE 0 END) AS done_orders,
            SUM(o.points) AS total_points,
-           AVG(CASE WHEN o.status='Đã xong' AND o.completed_at IS NOT NULL
+           AVG(CASE WHEN o.status='Hoàn thành' AND o.completed_at IS NOT NULL
                 THEN julianday(o.completed_at) - julianday(o.order_date) END) AS avg_days
     FROM users u
     JOIN orders o ON o.editor_id = u.id AND o.order_date BETWEEN ? AND ?${edFilter}
-    WHERE u.role='editor'
+    WHERE u.role='editor' AND u.active = 1
     GROUP BY u.id ORDER BY done_orders DESC
   `).all(...params);
 
@@ -536,7 +541,7 @@ app.get('/api/reports/editor', authenticate, requireRole('admin', 'editor'), (re
   const timeline = db.prepare(`
     SELECT o.completed_at AS day, COUNT(o.id) AS cnt, SUM(o.points) AS pts
     FROM orders o
-    WHERE o.status='Đã xong' AND o.completed_at IS NOT NULL
+    WHERE o.status='Hoàn thành' AND o.completed_at IS NOT NULL
       AND o.completed_at BETWEEN ? AND ?${edFilter}
     GROUP BY o.completed_at ORDER BY o.completed_at
   `).all(...params);
