@@ -388,7 +388,7 @@ async function viewOrders(c) {
   const table = el('table', {},
     el('thead', {}, el('tr', {},
       el('th', {}, 'Loại'), el('th', {}, 'Mã'), el('th', {}, 'App / Loại order'), el('th', {}, 'Mục tiêu'),
-      showUA ? el('th', {}, 'UA') : null, el('th', {}, 'Editor'), el('th', {}, 'Trạng thái'), el('th', {}, 'Ngày'), el('th', {}, 'Điểm'),
+      showUA ? el('th', {}, 'Người order') : null, el('th', {}, 'Editor'), el('th', {}, 'Trạng thái'), el('th', {}, 'Ngày'), el('th', {}, 'Điểm'),
     )),
     el('tbody', {}, orders.map(o => {
       const tr = el('tr', { style: 'cursor:pointer', onclick: () => openOrderDetail(o.id) },
@@ -419,7 +419,7 @@ function renderOrderFilters() {
   wrap.appendChild(filterSelect('status', 'Trạng thái', [['', 'Tất cả'], ...meta.statuses.map(s => [s, s])], apply));
   wrap.appendChild(filterSelect('category', 'Loại', [['', 'Tất cả'], ['image', 'Ảnh'], ['video', 'Video']], apply));
   if (role === 'admin') {
-    wrap.appendChild(filterSelect('ua_id', 'UA', [['', 'Tất cả'], ...meta.uas.map(u => [u.id, u.full_name])], apply));
+    wrap.appendChild(filterSelect('ua_id', 'Người order', [['', 'Tất cả'], ...meta.uas.map(u => [u.id, u.full_name])], apply));
     wrap.appendChild(filterSelect('editor_id', 'Editor', [['', 'Tất cả'], ['none', '— Chưa giao —'], ...meta.editors.map(u => [u.id, u.full_name])], apply));
   }
   wrap.appendChild(filterInput('from', 'Từ ngày', '', apply, 'date'));
