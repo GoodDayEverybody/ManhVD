@@ -414,20 +414,20 @@ async function viewOrders(c) {
 
   const table = el('table', {},
     el('thead', {}, el('tr', {},
-      el('th', {}, 'Loại'), el('th', {}, 'Mã'), el('th', {}, 'App / Loại order'), el('th', {}, 'Mục tiêu'),
-      showUA ? el('th', {}, 'Người order') : null, el('th', {}, 'Người làm'), el('th', {}, 'Trạng thái'), el('th', {}, 'Ngày'), el('th', {}, 'Điểm'),
+      el('th', {}, 'Loại'), el('th', {}, 'Mã'), el('th', {}, 'App'), el('th', {}, 'Mục tiêu'),
+      showUA ? el('th', {}, 'Người order') : null, el('th', {}, 'Người làm'), el('th', {}, 'Trạng thái'), el('th', {}, 'Ngày order'), el('th', {}, 'Ngày hoàn thành'),
     )),
     el('tbody', {}, orders.map(o => {
       const tr = el('tr', { style: 'cursor:pointer', onclick: () => openOrderDetail(o.id) },
         el('td', {}, catPill(o.category)),
         el('td', {}, el('span', { class: 'code-cell' }, o.order_code)),
-        el('td', {}, el('div', {}, appLabel(o)), el('div', { class: 'muted', style: 'font-size:12px' }, o.order_type_name || '')),
+        el('td', {}, appLabel(o)),
         el('td', {}, o.objective || '—'),
         showUA ? el('td', {}, o.ua_name || '—') : null,
         el('td', {}, o.editor_name ? el('span', {}, o.editor_name) : el('span', { class: 'badge amber' }, 'Chưa giao')),
         el('td', {}, statusBadge(o.status)),
         el('td', { class: 'nowrap' }, fmtDate(o.order_date)),
-        el('td', { class: 'nowrap' }, fmtNum(o.points)),
+        el('td', { class: 'nowrap' }, o.completed_at ? fmtDate(o.completed_at) : '—'),
       );
       return tr;
     })),
