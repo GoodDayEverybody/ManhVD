@@ -559,6 +559,40 @@ async function openOrderForm(order) {
   await buildOrderForm(body, order, false, closeM);
 }
 
+// Dropdown có ô tìm kiếm. items: [{value, label}]. Trả { node, getValue }
+function makeCombo(items, selectedValue, placeholder, onChange) {
+  let value = (selectedValue != null && selectedValue !== '') ? String(selectedValue) : '';
+  const wrap = el('div', { class: 'combo' });
+  const display = el('button', { type: 'button', class: 'combo-display' });
+  const panel = el('div', { class: 'combo-panel', style: 'display:none' });
+  const search = el('input', { class: 'combo-search', placeholder: '🔍 Tìm app...' });
+  const list = el('div', { class: 'combo-list' });
+  panel.appendChild(search); panel.appendChild(list);
+  wrap.appendChild(display); wrap.appendChild(panel);
+
+  const labelFor = (v) => { const it = items.find(i => String(i.value) === String(v)); return it ? it.label : ''; };
+  const renderDisplay = () => { display.textContent = value ? labelFor(value) : placeholder; display.classList.toggle('placeholder', !value); };
+  const renderList = (filter) => {
+    list.innerHTML = '';
+    const f = (filter || '').trim().toLowerCase();
+    const matched = items.filter(i => i.label.toLowerCase().includes(f));
+    if (!matched.length) { list.appendChild(el('div', { class: 'combo-empty' }, 'Không tìm thấy')); return; }
+    matched.forEach(i => {
+      const opt = el('div', { class: 'combo-opt' + (String(i.value) === String(value) ? ' sel' : '') }, i.label);
+      opt.addEventListener('click', () => { value = String(i.value); renderDisplay(); close(); if (onChange) onChange(value); });
+      list.appendChild(opt);
+    });
+  };
+  const onOutside = (e) => { if (!wrap.contains(e.target)) close(); };
+  const open = () => { panel.style.display = ''; search.value = ''; renderList(''); setTimeout(() => search.focus(), 0); document.addEventListener('mousedown', onOutside, true); };
+  const close = () => { panel.style.display = 'none'; document.removeEventListener('mousedown', onOutside, true); };
+  display.addEventListener('click', (e) => { e.preventDefault(); panel.style.display === 'none' ? open() : close(); });
+  search.addEventListener('input', () => renderList(search.value));
+  search.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  renderDisplay();
+  return { node: wrap, getValue: () => value };
+}
+
 async function buildOrderForm(container, order, inline, closeM) {
   const meta = State.meta;
   const role = State.user.role;
@@ -581,18 +615,21 @@ async function buildOrderForm(container, order, inline, closeM) {
   };
   fillTypes();
 
-  // App (bắt buộc) + link "Xem app" để kiểm tra đúng app
-  const appSel = el('select', {}, el('option', { value: '' }, '— Chọn app —'),
-    appList.map(a => el('option', { value: a.id, selected: order && order.app_id === a.id }, a.code + ' - ' + a.name)));
+  // App (bắt buộc) + ô tìm kiếm + link "Xem app" để kiểm tra đúng app
   const appHint = el('div', { style: 'margin-top:6px' });
   const updateAppLink = () => {
     appHint.innerHTML = '';
-    const a = appList.find(x => x.id === Number(appSel.value));
+    const a = appList.find(x => x.id === Number(appCombo.getValue()));
     if (!a) return;
     if (a.link) appHint.appendChild(el('a', { class: 'app-view-link', href: a.link, target: '_blank' }, '🔗 Xem app'));
     else appHint.appendChild(el('span', { class: 'hint' }, 'App này chưa có link store'));
   };
-  appSel.addEventListener('change', updateAppLink);
+  const appCombo = makeCombo(
+    appList.map(a => ({ value: a.id, label: a.code + ' - ' + a.name })),
+    order ? order.app_id : '',
+    '— Chọn app —',
+    () => updateAppLink()
+  );
 
   // Order date = ngày tạo order, không cho chọn
   const orderDateDefault = order ? (order.order_date || '').slice(0, 10) : new Date().toISOString().slice(0, 10);
@@ -612,8 +649,12 @@ async function buildOrderForm(container, order, inline, closeM) {
     const selected = new Set(firstSizeRender ? initialSizes : []);
     firstSizeRender = false;
     sizeBox.innerHTML = '';
+
+    const allCb = el('input', { type: 'checkbox' });
+    sizeBox.appendChild(el('label', { class: 'size-check size-all' }, allCb, el('span', {}, 'Tất cả')));
+
     if (cat.value === 'video') {
-      sizeBox.appendChild(el('div', { class: 'hint', style: 'margin-bottom:6px' }, 'Chọn một hoặc nhiều (không bắt buộc):'));
+      sizeBox.appendChild(el('div', { class: 'hint', style: 'margin:4px 0 6px' }, 'Chọn một hoặc nhiều (không bắt buộc):'));
       const row = el('div', { class: 'size-grid' });
       ['1080x1920', '1080x1080', '1920x1080'].forEach(s => row.appendChild(sizeCheckbox(s, selected.has(s))));
       sizeBox.appendChild(row);
@@ -630,11 +671,17 @@ async function buildOrderForm(container, order, inline, closeM) {
       const otherText = el('input', { type: 'text', placeholder: 'Nhập kích thước khác, vd: 1440x2560', style: 'margin-top:6px; display:none' });
       if (leftover.length) { otherCb.checked = true; otherText.value = leftover.join(', '); otherText.style.display = ''; }
       otherCb.addEventListener('change', () => { otherText.style.display = otherCb.checked ? '' : 'none'; if (otherCb.checked) otherText.focus(); });
-      sizeBox.appendChild(el('div', { class: 'size-group-title' }, 'Other'));
-      sizeBox.appendChild(el('label', { class: 'size-check' }, otherCb, el('span', {}, 'Other (kích thước khác)')));
+      sizeBox.appendChild(el('label', { class: 'size-check', style: 'margin-top:8px' }, otherCb, el('span', {}, 'Other (kích thước khác)')));
       sizeBox.appendChild(otherText);
       sizeBox._otherCb = otherCb; sizeBox._otherText = otherText;
     }
+
+    // "Tất cả": tick/bỏ tick toàn bộ; tự đồng bộ khi chọn từng ô
+    const allBoxes = [...sizeBox.querySelectorAll('input[type=checkbox][value]')];
+    const syncAll = () => { allCb.checked = allBoxes.length > 0 && allBoxes.every(b => b.checked); };
+    allBoxes.forEach(b => b.addEventListener('change', syncAll));
+    allCb.addEventListener('change', () => allBoxes.forEach(b => { b.checked = allCb.checked; }));
+    syncAll();
   };
   buildSizeSection();
 
@@ -659,13 +706,12 @@ async function buildOrderForm(container, order, inline, closeM) {
       el('div', { class: 'field' }, el('label', {}, 'Loại creative ', el('span', { class: 'req' }, '*')), cat),
       el('div', { class: 'field' }, el('label', {}, 'Loại order ', el('span', { class: 'req' }, '*')), typeSel),
     ),
-    el('div', { class: 'field' }, el('label', {}, 'App ', el('span', { class: 'req' }, '*')), appSel, appHint),
+    el('div', { class: 'field' }, el('label', {}, 'App ', el('span', { class: 'req' }, '*')), appCombo.node, appHint),
     el('div', { class: 'field' }, el('label', {}, 'Order date'), orderDateDisplay),
     el('div', { class: 'field' }, el('label', {}, 'Mô tả chi tiết'), desc),
     el('div', { class: 'field' }, el('label', {}, 'Kích thước'), sizeBox),
     el('div', { class: 'field' }, el('label', {}, 'Ref link'), ref),
     el('div', { class: 'field' }, el('label', {}, 'Lưu ý'), noteReq),
-    isAdmin ? el('div', { class: 'section-title' }, 'Quản lý (Admin)') : null,
     isAdmin ? el('div', { class: 'field' }, el('label', {}, 'Giao cho Editor'), editorSel) : null,
     isAdmin && order ? el('div', { class: 'field' }, el('label', {}, 'Trạng thái'), statusSel) : null,
   ));
@@ -673,12 +719,13 @@ async function buildOrderForm(container, order, inline, closeM) {
   updateAppLink();
 
   const submit = async () => {
-    if (!appSel.value) return toast('Vui lòng chọn App', 'err');
+    const appId = appCombo.getValue();
+    if (!appId) return toast('Vui lòng chọn App', 'err');
     if (!typeSel.value) return toast('Vui lòng chọn loại order', 'err');
     const body = {
       category: cat.value, order_type_id: Number(typeSel.value),
-      app_id: Number(appSel.value),
-      app_name: (appList.find(a => a.id === Number(appSel.value)) || {}).name || '',
+      app_id: Number(appId),
+      app_name: (appList.find(a => a.id === Number(appId)) || {}).name || '',
       order_date: orderDateDefault, description: desc.value,
       ref_link: ref.value, size: collectSizes(), note_request: noteReq.value,
     };

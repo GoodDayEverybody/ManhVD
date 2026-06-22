@@ -144,6 +144,20 @@ textarea { resize: vertical; min-height: 70px; }
 .size-group-title { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--primary); font-weight: 700; margin: 12px 0 6px; }
 .app-view-link { display: inline-block; color: var(--success); font-weight: 600; font-size: 13px; }
 .app-view-link:hover { text-decoration: underline; }
+.size-all { font-weight: 700; }
+
+/* combobox có tìm kiếm */
+.combo { position: relative; }
+.combo-display { width: 100%; text-align: left; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: #fff; font-size: 14px; font-family: inherit; cursor: pointer; color: var(--text); }
+.combo-display:hover { border-color: #c7cdd9; }
+.combo-display.placeholder { color: #9ca3af; }
+.combo-panel { position: absolute; z-index: 130; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 8px; }
+.combo-search { margin-bottom: 6px; }
+.combo-list { max-height: 220px; overflow-y: auto; }
+.combo-opt { padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.combo-opt:hover { background: var(--primary-light); }
+.combo-opt.sel { background: var(--primary); color: #fff; }
+.combo-empty { padding: 10px; color: var(--muted); font-size: 13px; text-align: center; }
 
 /* ---------- Filters ---------- */
 .filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: end; }
