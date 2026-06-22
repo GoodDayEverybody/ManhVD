@@ -650,38 +650,40 @@ async function buildOrderForm(container, order, inline, closeM) {
     firstSizeRender = false;
     sizeBox.innerHTML = '';
 
-    const allCb = el('input', { type: 'checkbox' });
-    sizeBox.appendChild(el('label', { class: 'size-check size-all' }, allCb, el('span', {}, 'Tất cả')));
+    // Mỗi nhóm có "Tất cả" riêng, chỉ chọn các option trong nhóm đó
+    const makeGroup = (title, arr) => {
+      const groupAll = el('input', { type: 'checkbox' });
+      const head = el('div', { class: 'size-group-head' },
+        title ? el('span', { class: 'size-group-title' }, title) : null,
+        el('label', { class: 'size-check size-group-all' }, groupAll, el('span', {}, 'Tất cả')));
+      const row = el('div', { class: 'size-grid' });
+      const boxes = arr.map(s => { const lbl = sizeCheckbox(s, selected.has(s)); row.appendChild(lbl); return lbl.querySelector('input'); });
+      sizeBox.appendChild(head); sizeBox.appendChild(row);
+      const sync = () => { groupAll.checked = boxes.length > 0 && boxes.every(b => b.checked); };
+      boxes.forEach(b => b.addEventListener('change', sync));
+      groupAll.addEventListener('change', () => boxes.forEach(b => { b.checked = groupAll.checked; }));
+      sync();
+    };
 
     if (cat.value === 'video') {
-      sizeBox.appendChild(el('div', { class: 'hint', style: 'margin:4px 0 6px' }, 'Chọn một hoặc nhiều (không bắt buộc):'));
-      const row = el('div', { class: 'size-grid' });
-      ['1080x1920', '1080x1080', '1920x1080'].forEach(s => row.appendChild(sizeCheckbox(s, selected.has(s))));
-      sizeBox.appendChild(row);
+      sizeBox.appendChild(el('div', { class: 'hint', style: 'margin-bottom:6px' }, 'Chọn một hoặc nhiều (không bắt buộc):'));
+      makeGroup(null, ['1080x1920', '1080x1080', '1920x1080']);
     } else {
       Object.entries(meta.sizes).forEach(([plat, arr]) => {
-        sizeBox.appendChild(el('div', { class: 'size-group-title' }, plat));
-        const row = el('div', { class: 'size-grid' });
-        arr.forEach(s => row.appendChild(sizeCheckbox(s, selected.has(s))));
-        sizeBox.appendChild(row);
+        if (plat === 'Other') return; // bỏ nhóm Other (512x512/1024x500)
+        makeGroup(plat, arr);
       });
-      const known = new Set(Object.values(meta.sizes).flat());
+      // Other (kích thước khác)
+      const known = new Set(Object.entries(meta.sizes).filter(([p]) => p !== 'Other').flatMap(([, a]) => a));
       const leftover = [...selected].filter(s => !known.has(s));
       const otherCb = el('input', { type: 'checkbox' });
       const otherText = el('input', { type: 'text', placeholder: 'Nhập kích thước khác, vd: 1440x2560', style: 'margin-top:6px; display:none' });
       if (leftover.length) { otherCb.checked = true; otherText.value = leftover.join(', '); otherText.style.display = ''; }
       otherCb.addEventListener('change', () => { otherText.style.display = otherCb.checked ? '' : 'none'; if (otherCb.checked) otherText.focus(); });
-      sizeBox.appendChild(el('label', { class: 'size-check', style: 'margin-top:8px' }, otherCb, el('span', {}, 'Other (kích thước khác)')));
+      sizeBox.appendChild(el('label', { class: 'size-check size-other-head' }, otherCb, el('span', {}, 'Other (kích thước khác)')));
       sizeBox.appendChild(otherText);
       sizeBox._otherCb = otherCb; sizeBox._otherText = otherText;
     }
-
-    // "Tất cả": tick/bỏ tick toàn bộ; tự đồng bộ khi chọn từng ô
-    const allBoxes = [...sizeBox.querySelectorAll('input[type=checkbox][value]')];
-    const syncAll = () => { allCb.checked = allBoxes.length > 0 && allBoxes.every(b => b.checked); };
-    allBoxes.forEach(b => b.addEventListener('change', syncAll));
-    allCb.addEventListener('change', () => allBoxes.forEach(b => { b.checked = allCb.checked; }));
-    syncAll();
   };
   buildSizeSection();
 

@@ -142,6 +142,11 @@ textarea { resize: vertical; min-height: 70px; }
 .size-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; font-size: 13px; }
 .size-check input[type=checkbox] { width: auto; margin: 0; }
 .size-group-title { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--primary); font-weight: 700; margin: 12px 0 6px; }
+.size-group-head { display: flex; align-items: center; gap: 14px; margin: 12px 0 6px; }
+.size-group-head .size-group-title { margin: 0; }
+.size-group-all { font-size: 12px; font-weight: 600; color: var(--muted); }
+.size-other-head { margin-top: 14px; }
+.size-other-head span { color: var(--primary); font-weight: 700; text-transform: uppercase; letter-spacing: .03em; font-size: 13px; }
 .app-view-link { display: inline-block; color: var(--success); font-weight: 600; font-size: 13px; }
 .app-view-link:hover { text-decoration: underline; }
 .size-all { font-weight: 700; }
