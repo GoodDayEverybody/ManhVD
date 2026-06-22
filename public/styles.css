@@ -137,6 +137,14 @@ textarea { resize: vertical; min-height: 70px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
+/* size checkboxes + app link */
+.size-grid { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
+.size-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; font-size: 13px; }
+.size-check input[type=checkbox] { width: auto; margin: 0; }
+.size-group-title { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--primary); font-weight: 700; margin: 12px 0 6px; }
+.app-view-link { display: inline-block; color: var(--success); font-weight: 600; font-size: 13px; }
+.app-view-link:hover { text-decoration: underline; }
+
 /* ---------- Filters ---------- */
 .filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: end; }
 .filters .field { margin-bottom: 0; min-width: 140px; }

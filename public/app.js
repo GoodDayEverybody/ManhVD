@@ -569,7 +569,6 @@ async function buildOrderForm(container, order, inline, closeM) {
   const allApps = isAdmin && order ? await api('/apps') : apps;
   const appList = (order ? allApps : apps);
 
-  const f = {};
   const cat = el('select', {}, el('option', { value: 'image' }, '🖼️ Ảnh'), el('option', { value: 'video' }, '🎬 Video'));
   cat.value = order ? order.category : 'image';
 
@@ -578,30 +577,80 @@ async function buildOrderForm(container, order, inline, closeM) {
     const cur = order ? order.order_type_id : null;
     typeSel.innerHTML = '';
     meta.orderTypes.filter(t => t.category === cat.value).forEach(t => {
-      typeSel.appendChild(el('option', { value: t.id, selected: t.id === cur }, t.name + ' (' + fmtNum(t.points) + 'đ' + (t.quantity_note && t.quantity_note !== '-' ? ' · ' + t.quantity_note : '') + ')'));
+      const label = t.name + (t.quantity_note && t.quantity_note !== '-' ? ' · ' + t.quantity_note : '');
+      typeSel.appendChild(el('option', { value: t.id, selected: t.id === cur }, label));
     });
   };
   fillTypes();
-  cat.addEventListener('change', fillTypes);
 
+  // App (bắt buộc) + link "Xem app" để kiểm tra đúng app
   const appSel = el('select', {}, el('option', { value: '' }, '— Chọn app —'),
-    appList.map(a => el('option', { value: a.id, selected: order && order.app_id === a.id }, a.code + ' · ' + a.name)));
+    appList.map(a => el('option', { value: a.id, selected: order && order.app_id === a.id }, a.code + ' - ' + a.name)));
+  const appHint = el('div', { style: 'margin-top:6px' });
+  const updateAppLink = () => {
+    appHint.innerHTML = '';
+    const a = appList.find(x => x.id === Number(appSel.value));
+    if (!a) return;
+    if (a.link) appHint.appendChild(el('a', { class: 'app-view-link', href: a.link, target: '_blank' }, '🔗 Xem app'));
+    else appHint.appendChild(el('span', { class: 'hint' }, 'App này chưa có link store'));
+  };
+  appSel.addEventListener('change', updateAppLink);
 
-  const objective = el('input', { value: order ? order.objective || '' : '', placeholder: 'vd: Ảnh quảng cáo, Video cắt dựng...' });
+  // Order date = ngày tạo order, không cho chọn
   const orderDateDefault = order ? (order.order_date || '').slice(0, 10) : new Date().toISOString().slice(0, 10);
-  const orderDate = el('input', { type: 'text', readonly: true });
+  const orderDateDisplay = el('input', { type: 'text', value: fmtDate(orderDateDefault), disabled: true });
+
   const desc = el('textarea', { placeholder: 'Mô tả chi tiết yêu cầu...' }, order ? order.description || '' : '');
-  const ref = el('input', { value: order ? order.ref_link || '' : '', placeholder: 'https://...' });
-  const figma = el('input', { value: order ? order.link_figma || '' : '', placeholder: 'Link App / Figma' });
+  const ref = el('textarea', { placeholder: 'Dán một hoặc nhiều link (mỗi link một dòng)...', style: 'min-height:100px' }, order ? order.ref_link || '' : '');
   const noteReq = el('input', { value: order ? order.note_request || '' : '', placeholder: 'Lưu ý cho editor' });
 
-  // Size: gợi ý theo platform + cho nhập tự do
-  const sizeInput = el('input', { value: order ? order.size || '' : '', placeholder: 'vd: 1080x1920', list: 'size-list' });
-  const datalist = el('datalist', { id: 'size-list' });
-  Object.entries(meta.sizes).forEach(([plat, arr]) => arr.forEach(s => datalist.appendChild(el('option', { value: s }, plat))));
+  // Kích thước: Ảnh -> checkbox theo platform + Other; Video -> 3 lựa chọn (đa chọn)
+  const initialSizes = order && order.size ? order.size.split(',').map(s => s.trim()).filter(Boolean) : [];
+  let firstSizeRender = true;
+  const sizeBox = el('div', {});
+  const sizeCheckbox = (value, checked) => el('label', { class: 'size-check' },
+    el('input', { type: 'checkbox', value, checked: checked ? true : false }), el('span', {}, value));
+  const buildSizeSection = () => {
+    const selected = new Set(firstSizeRender ? initialSizes : []);
+    firstSizeRender = false;
+    sizeBox.innerHTML = '';
+    if (cat.value === 'video') {
+      sizeBox.appendChild(el('div', { class: 'hint', style: 'margin-bottom:6px' }, 'Chọn một hoặc nhiều (không bắt buộc):'));
+      const row = el('div', { class: 'size-grid' });
+      ['1080x1920', '1080x1080', '1920x1080'].forEach(s => row.appendChild(sizeCheckbox(s, selected.has(s))));
+      sizeBox.appendChild(row);
+    } else {
+      Object.entries(meta.sizes).forEach(([plat, arr]) => {
+        sizeBox.appendChild(el('div', { class: 'size-group-title' }, plat));
+        const row = el('div', { class: 'size-grid' });
+        arr.forEach(s => row.appendChild(sizeCheckbox(s, selected.has(s))));
+        sizeBox.appendChild(row);
+      });
+      const known = new Set(Object.values(meta.sizes).flat());
+      const leftover = [...selected].filter(s => !known.has(s));
+      const otherCb = el('input', { type: 'checkbox' });
+      const otherText = el('input', { type: 'text', placeholder: 'Nhập kích thước khác, vd: 1440x2560', style: 'margin-top:6px; display:none' });
+      if (leftover.length) { otherCb.checked = true; otherText.value = leftover.join(', '); otherText.style.display = ''; }
+      otherCb.addEventListener('change', () => { otherText.style.display = otherCb.checked ? '' : 'none'; if (otherCb.checked) otherText.focus(); });
+      sizeBox.appendChild(el('div', { class: 'size-group-title' }, 'Other'));
+      sizeBox.appendChild(el('label', { class: 'size-check' }, otherCb, el('span', {}, 'Other (kích thước khác)')));
+      sizeBox.appendChild(otherText);
+      sizeBox._otherCb = otherCb; sizeBox._otherText = otherText;
+    }
+  };
+  buildSizeSection();
 
-  // Admin-only: chọn UA & editor & status
-  const uaSel = el('select', {}, meta.uas.map(u => el('option', { value: u.id, selected: order && order.ua_id === u.id }, u.full_name)));
+  const collectSizes = () => {
+    const vals = [...sizeBox.querySelectorAll('input[type=checkbox][value]:checked')].map(c => c.value);
+    if (cat.value === 'image' && sizeBox._otherCb && sizeBox._otherCb.checked && sizeBox._otherText.value.trim()) {
+      vals.push(sizeBox._otherText.value.trim());
+    }
+    return vals.join(', ');
+  };
+
+  cat.addEventListener('change', () => { fillTypes(); buildSizeSection(); });
+
+  // Admin: giao editor & trạng thái (Người order tự gán theo người tạo)
   const editorSel = el('select', {}, el('option', { value: '' }, '— Chưa giao —'),
     meta.editors.map(u => el('option', { value: u.id, selected: order && order.editor_id === u.id }, u.full_name + ' (' + (u.editor_type === 'video' ? 'Video' : u.editor_type === 'both' ? 'Designer+Video' : 'Designer') + ')')));
   const statusSel = el('select', {}, meta.statuses.map(s => el('option', { value: s, selected: order && order.status === s }, s)));
@@ -612,45 +661,35 @@ async function buildOrderForm(container, order, inline, closeM) {
       el('div', { class: 'field' }, el('label', {}, 'Loại creative ', el('span', { class: 'req' }, '*')), cat),
       el('div', { class: 'field' }, el('label', {}, 'Loại order ', el('span', { class: 'req' }, '*')), typeSel),
     ),
-    el('div', { class: 'field' }, el('label', {}, 'App'), appSel),
-    el('div', { class: 'form-row' },
-      el('div', { class: 'field' }, el('label', {}, 'Mục tiêu'), objective),
-      el('div', { class: 'field' }, el('label', {}, 'Order date'), orderDate),
-    ),
+    el('div', { class: 'field' }, el('label', {}, 'App ', el('span', { class: 'req' }, '*')), appSel, appHint),
+    el('div', { class: 'field' }, el('label', {}, 'Order date'), orderDateDisplay),
     el('div', { class: 'field' }, el('label', {}, 'Mô tả chi tiết'), desc),
-    el('div', { class: 'form-row' },
-      el('div', { class: 'field' }, el('label', {}, 'Kích thước'), sizeInput, datalist),
-      el('div', { class: 'field' }, el('label', {}, 'Ref link'), ref),
-    ),
-    el('div', { class: 'form-row' },
-      el('div', { class: 'field' }, el('label', {}, 'Link App / Figma'), figma),
-      el('div', { class: 'field' }, el('label', {}, 'Lưu ý'), noteReq),
-    ),
+    el('div', { class: 'field' }, el('label', {}, 'Kích thước'), sizeBox),
+    el('div', { class: 'field' }, el('label', {}, 'Ref link'), ref),
+    el('div', { class: 'field' }, el('label', {}, 'Lưu ý'), noteReq),
     isAdmin ? el('div', { class: 'section-title' }, 'Quản lý (Admin)') : null,
-    isAdmin ? el('div', { class: 'form-row' },
-      el('div', { class: 'field' }, el('label', {}, 'Người order (UA)'), uaSel),
-      el('div', { class: 'field' }, el('label', {}, 'Giao cho Editor'), editorSel),
-    ) : null,
+    isAdmin ? el('div', { class: 'field' }, el('label', {}, 'Giao cho Editor'), editorSel) : null,
     isAdmin && order ? el('div', { class: 'field' }, el('label', {}, 'Trạng thái'), statusSel) : null,
   ));
 
-  initDatePicker(orderDate, orderDateDefault);
+  updateAppLink();
 
   const submit = async () => {
+    if (!appSel.value) return toast('Vui lòng chọn App', 'err');
+    if (!typeSel.value) return toast('Vui lòng chọn loại order', 'err');
     const body = {
       category: cat.value, order_type_id: Number(typeSel.value),
-      app_id: appSel.value ? Number(appSel.value) : null,
-      app_name: appSel.value ? (appList.find(a => a.id === Number(appSel.value)) || {}).name : '',
-      objective: objective.value, order_date: orderDate.value, description: desc.value,
-      ref_link: ref.value, size: sizeInput.value, link_figma: figma.value, note_request: noteReq.value,
+      app_id: Number(appSel.value),
+      app_name: (appList.find(a => a.id === Number(appSel.value)) || {}).name || '',
+      order_date: orderDateDefault, description: desc.value,
+      ref_link: ref.value, size: collectSizes(), note_request: noteReq.value,
     };
-    if (isAdmin) { body.ua_id = Number(uaSel.value); body.editor_id = editorSel.value ? Number(editorSel.value) : null; if (order) body.status = statusSel.value; }
-    if (!body.order_type_id) return toast('Vui lòng chọn loại order', 'err');
+    if (isAdmin) { body.editor_id = editorSel.value ? Number(editorSel.value) : null; if (order) body.status = statusSel.value; }
     try {
       if (order) { await api('/orders/' + order.id, { method: 'PUT', body }); toast('Đã lưu thay đổi'); }
       else { const r = await api('/orders', { method: 'POST', body }); toast('Đã tạo order ' + r.order_code); }
       if (closeM) closeM();
-      if (inline) { objective.value = desc.value = ref.value = sizeInput.value = noteReq.value = ''; location.hash = '#/orders'; }
+      if (inline) location.hash = '#/orders';
       else route();
     } catch (e) { toast(e.message, 'err'); }
   };
