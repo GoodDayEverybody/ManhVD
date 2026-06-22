@@ -67,7 +67,7 @@ function fmtNum(n) { return (Math.round((n || 0) * 100) / 100).toLocaleString('v
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 function statusBadge(s) {
-  const map = { 'Chờ làm': 'amber', 'Đang làm': 'orange', 'Hoàn thành': 'green', 'Yêu cầu sửa': 'red', 'Hủy': 'darkred' };
+  const map = { 'Chờ làm': 'gray', 'Đang làm': 'blue', 'Hoàn thành': 'green', 'Yêu cầu sửa': 'red', 'Hủy': 'darkred' };
   return el('span', { class: 'badge ' + (map[s] || 'gray') }, s);
 }
 function appStatusBadge(s) {
