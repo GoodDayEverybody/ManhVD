@@ -84,6 +84,13 @@ function appLabel(o) {
 function editorTypeLabel(t) {
   return ({ graphic: 'Graphic Designer', video: 'Video Editor', uiux: 'UI/UX Designer', designer: 'Graphic Designer', both: 'Graphic+Video' })[t] || t || '';
 }
+// Badge vai trò có màu riêng cho dễ phân biệt
+function roleBadge(u) {
+  if (u.role === 'admin') return el('span', { class: 'badge red' }, 'Admin');
+  if (u.role === 'ua') return el('span', { class: 'badge blue' }, 'UA');
+  const map = { graphic: 'green', video: 'amber', uiux: 'purple' };
+  return el('span', { class: 'badge ' + (map[u.editor_type] || 'green') }, editorTypeLabel(u.editor_type));
+}
 // 5 vai trò user, mã hóa role[:editor_type]
 const USER_ROLES = [
   ['ua', 'UA'],
@@ -854,7 +861,7 @@ async function viewUsers(c) {
   c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Quản lý User'), el('span', { class: 'muted' }, '· ' + users.length + ' tài khoản'),
     el('span', { class: 'spacer' }), el('button', { class: 'btn primary', onclick: () => openUserForm(null) }, '➕ Thêm user')));
 
-  const roleLabel = (u) => u.role === 'admin' ? el('span', { class: 'badge purple' }, 'Admin') : u.role === 'ua' ? el('span', { class: 'badge blue' }, 'UA') : el('span', { class: 'badge green' }, editorTypeLabel(u.editor_type));
+  const roleLabel = roleBadge;
 
   const table = el('table', {},
     el('thead', {}, el('tr', {}, el('th', {}, 'Họ tên'), el('th', {}, 'Username'), el('th', {}, 'Vai trò'), el('th', {}, 'Trạng thái'), el('th', {}, ''))),
@@ -973,7 +980,7 @@ async function settingsUsers(box, role) {
     el('tbody', {}, users.map(u => el('tr', { style: u.active ? '' : 'opacity:.5' },
       el('td', {}, u.full_name),
       el('td', {}, el('code', {}, u.username)),
-      role === 'editor' ? el('td', {}, editorTypeLabel(u.editor_type)) : null,
+      role === 'editor' ? el('td', {}, roleBadge(u)) : null,
       el('td', {}, u.active ? el('span', { class: 'badge green' }, 'Hoạt động') : el('span', { class: 'badge gray' }, 'Đã khóa')),
       el('td', { class: 'nowrap' },
         el('button', { class: 'btn sm', onclick: () => openUserForm(u, role) }, '✏️'), ' ',
@@ -1082,15 +1089,38 @@ function openSizeForm(s, platforms) {
 /* ============================ Reports ============================ */
 
 let reportTab = 'ua';
-let reportRange = 30;
+let reportRange = 30;          // số ngày, hoặc 'custom'
+let reportFrom = '', reportTo = '';
+
+function reportRangeQuery() {
+  if (reportRange === 'custom') {
+    return `from=${reportFrom || '2000-01-01'}&to=${reportTo || '2999-12-31'}`;
+  }
+  return rangeQuery(reportRange);
+}
 
 async function viewReports(c) {
   setTitle('Báo cáo');
   c.innerHTML = '';
-  const head = el('div', { class: 'page-head' }, el('h1', {}, 'Báo cáo hiệu suất'), el('span', { class: 'spacer' }),
-    el('select', { onchange: (e) => { reportRange = Number(e.target.value); route(); } },
-      [[7, '7 ngày'], [30, '30 ngày'], [90, '90 ngày'], [365, '1 năm']].map(([v, t]) => el('option', { value: v, selected: reportRange === v }, t))));
+
+  const rangeSel = el('select', { onchange: (e) => { reportRange = e.target.value === 'custom' ? 'custom' : Number(e.target.value); route(); } },
+    [[7, '7 ngày'], [30, '30 ngày'], [90, '90 ngày'], [365, '1 năm'], ['custom', 'Tùy chọn…']]
+      .map(([v, t]) => el('option', { value: v, selected: String(reportRange) === String(v) }, t)));
+
+  const head = el('div', { class: 'page-head' }, el('h1', {}, 'Báo cáo hiệu suất'), el('span', { class: 'spacer' }), rangeSel);
   c.appendChild(head);
+
+  if (reportRange === 'custom') {
+    const fromInp = el('input', { type: 'text', placeholder: 'Từ ngày', readonly: true, style: 'min-width:150px' });
+    const toInp = el('input', { type: 'text', placeholder: 'Đến ngày', readonly: true, style: 'min-width:150px' });
+    setTimeout(() => {
+      initDatePicker(fromInp, reportFrom || null, (d) => { reportFrom = d; route(); });
+      initDatePicker(toInp, reportTo || null, (d) => { reportTo = d; route(); });
+    }, 0);
+    c.appendChild(el('div', { class: 'filters', style: 'margin-bottom:16px' },
+      el('div', { class: 'field' }, el('label', {}, 'Từ ngày'), fromInp),
+      el('div', { class: 'field' }, el('label', {}, 'Đến ngày'), toInp)));
+  }
 
   const tabs = el('div', { class: 'tabs' },
     el('button', { class: reportTab === 'ua' ? 'active' : '', onclick: () => { reportTab = 'ua'; route(); } }, '👤 Hiệu suất UA'),
@@ -1104,30 +1134,58 @@ async function viewReports(c) {
 }
 
 async function reportUA(box) {
-  const rep = await api('/reports/ua?' + rangeQuery(reportRange));
+  const rep = await api('/reports/ua?' + reportRangeQuery());
   box.innerHTML = '';
   const g = el('div', { class: 'grid-2' });
   g.appendChild(chartCard('Số order theo UA', 'r-ua-cnt'));
-  g.appendChild(chartCard('Breakdown theo loại order', 'r-ua-type'));
+  g.appendChild(chartCard('Số lượng ảnh/video theo loại order', 'r-ua-type'));
   box.appendChild(g);
   box.appendChild(el('div', { class: 'card card-pad', style: 'margin-top:16px' }, el('h3', {}, 'Order theo ngày'), el('div', { class: 'chart-box' }, el('canvas', { id: 'r-ua-tl' }))));
 
+  const tbody = el('tbody', {});
+  if (!rep.perUser.length) tbody.appendChild(el('tr', {}, el('td', { colspan: 7, class: 'muted', style: 'text-align:center' }, 'Chưa có dữ liệu')));
+  rep.perUser.forEach(u => {
+    const caret = el('button', { class: 'btn sm ghost', title: 'Xem theo app' }, '▸');
+    const tr = el('tr', {},
+      el('td', {}, caret, ' ', u.full_name),
+      el('td', {}, u.total_orders),
+      el('td', {}, u.image_qty || 0),
+      el('td', {}, u.video_qty || 0),
+      el('td', {}, u.done_orders),
+      el('td', {}, fmtNum(u.total_points)),
+    );
+    let detail = null;
+    caret.addEventListener('click', async () => {
+      if (detail) { detail.remove(); detail = null; caret.textContent = '▸'; return; }
+      caret.textContent = '▾';
+      let apps = [];
+      try { apps = await api(`/reports/ua/${u.id}/by-app?` + reportRangeQuery()); } catch (e) { toast(e.message, 'err'); }
+      const sub = el('table', { class: 'subtable' },
+        el('thead', {}, el('tr', {}, el('th', {}, 'App'), el('th', {}, 'Số order'), el('th', {}, 'Số ảnh'), el('th', {}, 'Số video'))),
+        el('tbody', {}, apps.length ? apps.map(a => el('tr', {},
+          el('td', {}, (a.app_code ? a.app_code + ' - ' : '') + a.app_name),
+          el('td', {}, a.cnt), el('td', {}, a.image_qty || 0), el('td', {}, a.video_qty || 0),
+        )) : [el('tr', {}, el('td', { colspan: 4, class: 'muted' }, 'Không có'))]),
+      );
+      detail = el('tr', { class: 'detail-row' }, el('td', { colspan: 6 }, el('div', { class: 'detail-pad' }, el('div', { class: 'muted', style: 'margin-bottom:6px; font-weight:600' }, '📱 Số lượng theo app — ' + u.full_name), sub)));
+      tr.after(detail);
+    });
+    tbody.appendChild(tr);
+  });
   const table = el('table', {},
-    el('thead', {}, el('tr', {}, el('th', {}, 'UA'), el('th', {}, 'Tổng order'), el('th', {}, 'Đã xong'), el('th', {}, 'Điểm'))),
-    el('tbody', {}, rep.perUser.length ? rep.perUser.map(u => el('tr', {}, el('td', {}, u.full_name), el('td', {}, u.total_orders), el('td', {}, u.done_orders), el('td', {}, fmtNum(u.total_points)))) :
-      [el('tr', {}, el('td', { colspan: 4, class: 'muted', style: 'text-align:center' }, 'Chưa có dữ liệu'))]),
-  );
+    el('thead', {}, el('tr', {}, el('th', {}, 'UA'), el('th', {}, 'Tổng order'), el('th', {}, 'Số ảnh'), el('th', {}, 'Số video'), el('th', {}, 'Đã xong'), el('th', {}, 'Điểm'))),
+    tbody);
   box.appendChild(el('div', { class: 'table-wrap', style: 'margin-top:16px' }, table));
 
   setTimeout(() => {
     drawBar('r-ua-cnt', rep.perUser.map(u => u.full_name), rep.perUser.map(u => u.total_orders), 'Số order');
-    drawBar('r-ua-type', rep.byType.slice(0, 12).map(t => t.name), rep.byType.slice(0, 12).map(t => t.cnt), 'Số order', '#9333ea');
+    drawBar('r-ua-type', rep.byType.slice(0, 12).map(t => t.name), rep.byType.slice(0, 12).map(t => t.qty), 'Số lượng', '#9333ea');
     drawLine('r-ua-tl', rep.timeline.map(t => fmtDate(t.day)), rep.timeline.map(t => t.cnt));
   }, 0);
 }
 
 async function reportEditor(box) {
-  const rep = await api('/reports/editor?' + rangeQuery(reportRange));
+  const rep = await api('/reports/editor?' + reportRangeQuery());
   box.innerHTML = '';
   const g = el('div', { class: 'grid-2' });
   g.appendChild(chartCard('Điểm theo Editor', 'r-ed-pts'));

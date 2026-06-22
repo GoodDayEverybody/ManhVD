@@ -435,6 +435,12 @@ function dateRange(q) {
   return { from: q.from || '2000-01-01', to: q.to || '2999-12-31' };
 }
 
+// Lấy số lượng ảnh/video từ "quantity_note" (vd "3 ảnh" -> 3, rỗng -> 1)
+function parseQty(note) {
+  const m = String(note || '').match(/\d+/);
+  return m ? parseInt(m[0], 10) : 1;
+}
+
 // Hiệu suất UA
 app.get('/api/reports/ua', authenticate, requireRole('admin', 'ua'), (req, res) => {
   const { from, to } = dateRange(req.query);
@@ -443,23 +449,29 @@ app.get('/api/reports/ua', authenticate, requireRole('admin', 'ua'), (req, res) 
   if (req.user.role === 'ua') { uaFilter = ' AND o.ua_id = ?'; params.push(req.user.id); }
   else if (req.query.ua_id) { uaFilter = ' AND o.ua_id = ?'; params.push(req.query.ua_id); }
 
-  const perUser = db.prepare(`
-    SELECT u.id, u.full_name,
-           COUNT(o.id) AS total_orders,
-           SUM(CASE WHEN o.status='Đã xong' THEN 1 ELSE 0 END) AS done_orders,
-           SUM(o.points) AS total_points
-    FROM users u
-    JOIN orders o ON o.ua_id = u.id AND o.order_date BETWEEN ? AND ?${uaFilter}
-    WHERE u.role='ua'
-    GROUP BY u.id ORDER BY total_orders DESC
+  const rows = db.prepare(`
+    SELECT o.ua_id, u.full_name, o.category, o.status, o.points,
+           t.name AS type_name, t.quantity_note
+    FROM orders o
+    JOIN users u ON u.id = o.ua_id
+    LEFT JOIN order_types t ON t.id = o.order_type_id
+    WHERE o.order_date BETWEEN ? AND ?${uaFilter}
   `).all(...params);
 
-  const byType = db.prepare(`
-    SELECT t.name, t.category, COUNT(o.id) AS cnt, SUM(o.points) AS pts
-    FROM orders o JOIN order_types t ON t.id = o.order_type_id
-    WHERE o.order_date BETWEEN ? AND ?${uaFilter}
-    GROUP BY t.id ORDER BY cnt DESC
-  `).all(...params);
+  const perUserMap = {}, byTypeMap = {};
+  for (const r of rows) {
+    const qty = parseQty(r.quantity_note);
+    const pu = perUserMap[r.ua_id] || (perUserMap[r.ua_id] = { id: r.ua_id, full_name: r.full_name, total_orders: 0, done_orders: 0, total_points: 0, image_qty: 0, video_qty: 0 });
+    pu.total_orders++;
+    if (r.status === 'Đã xong') pu.done_orders++;
+    pu.total_points += r.points || 0;
+    if (r.category === 'video') pu.video_qty += qty; else pu.image_qty += qty;
+    const key = (r.type_name || '—') + '|' + r.category;
+    const bt = byTypeMap[key] || (byTypeMap[key] = { name: r.type_name || '—', category: r.category, cnt: 0, qty: 0, pts: 0 });
+    bt.cnt++; bt.qty += qty; bt.pts += r.points || 0;
+  }
+  const perUser = Object.values(perUserMap).sort((a, b) => b.total_orders - a.total_orders);
+  const byType = Object.values(byTypeMap).sort((a, b) => b.cnt - a.cnt);
 
   const timeline = db.prepare(`
     SELECT o.order_date AS day, COUNT(o.id) AS cnt
@@ -469,6 +481,29 @@ app.get('/api/reports/ua', authenticate, requireRole('admin', 'ua'), (req, res) 
   `).all(...params);
 
   res.json({ perUser, byType, timeline });
+});
+
+// Drill-down: số lượng theo từng app của 1 UA
+app.get('/api/reports/ua/:uaId/by-app', authenticate, requireRole('admin', 'ua'), (req, res) => {
+  if (req.user.role === 'ua' && Number(req.params.uaId) !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
+  const { from, to } = dateRange(req.query);
+  const rows = db.prepare(`
+    SELECT o.app_id, o.app_name, a.code AS app_code, o.category, t.quantity_note
+    FROM orders o
+    LEFT JOIN apps a ON a.id = o.app_id
+    LEFT JOIN order_types t ON t.id = o.order_type_id
+    WHERE o.ua_id = ? AND o.order_date BETWEEN ? AND ?
+  `).all(req.params.uaId, from, to);
+
+  const map = {};
+  for (const r of rows) {
+    const qty = parseQty(r.quantity_note);
+    const key = r.app_id || ('x' + (r.app_name || ''));
+    const a = map[key] || (map[key] = { app_name: r.app_name || '—', app_code: r.app_code || '', cnt: 0, image_qty: 0, video_qty: 0 });
+    a.cnt++;
+    if (r.category === 'video') a.video_qty += qty; else a.image_qty += qty;
+  }
+  res.json(Object.values(map).sort((a, b) => b.cnt - a.cnt));
 });
 
 // Hiệu suất Editor

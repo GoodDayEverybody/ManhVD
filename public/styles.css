@@ -150,6 +150,10 @@ textarea { resize: vertical; min-height: 70px; }
 .size-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px 5px 11px; background: #f1f5f9; border-radius: 8px; font-size: 13px; font-weight: 600; }
 .size-chip .chip-edit, .size-chip .chip-x { border: none; background: none; cursor: pointer; font-size: 12px; padding: 0 2px; color: var(--muted); }
 .size-chip .chip-x:hover { color: var(--danger); }
+.detail-row > td { background: #f8fafc; padding: 12px 16px; }
+.detail-pad { padding: 4px 0; }
+.subtable { width: 100%; max-width: 560px; background: #fff; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.subtable thead th { background: #eef2ff; }
 .app-view-link { display: inline-block; color: var(--success); font-weight: 600; font-size: 13px; }
 .app-view-link:hover { text-decoration: underline; }
 .size-all { font-weight: 700; }
