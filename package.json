@@ -8,7 +8,8 @@
     "start:once": "node server/index.js",
     "seed": "node server/seed.js",
     "setup": "node server/seed.js",
-    "backup": "node server/backup.js"
+    "backup": "node server/backup.js",
+    "reset": "node server/reset.js"
   },
   "license": "MIT",
   "engines": {

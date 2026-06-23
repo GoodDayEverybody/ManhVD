@@ -6,6 +6,11 @@ kèm **truy cập trong văn phòng (LAN)** và **truy cập từ xa qua Interne
 > Toàn bộ dữ liệu nằm trong thư mục `data/` (file `app.db` + khóa `.secret`).
 > Đừng bao giờ chạy `npm run seed` trên máy thật — nó **xóa sạch** để tạo lại dữ liệu mẫu.
 
+> **Chuyển sang dùng dữ liệu thật lần đầu:** bấm **`reset-data.bat`** (gõ `XOA` để xác
+> nhận) — script tự backup rồi xóa nhân viên/app/order **mẫu**, GIỮ lại tài khoản admin
+> và cấu hình (loại order & điểm, size, đối tác). Sau đó đăng nhập admin → Cài đặt →
+> Nhập dữ liệu để nạp user/app thật.
+
 ---
 
 ## 1. Chuẩn bị PC (làm 1 lần)
