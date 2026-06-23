@@ -53,6 +53,7 @@ function init() {
       token_version INTEGER NOT NULL DEFAULT 0, -- tăng lên để vô hiệu hóa phiên đăng nhập cũ
       totp_secret   TEXT,                       -- secret 2FA (base32)
       totp_enabled  INTEGER NOT NULL DEFAULT 0, -- đã bật 2FA chưa
+      must_change_password INTEGER NOT NULL DEFAULT 0, -- bắt đổi mật khẩu lần đăng nhập đầu
       created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
 
@@ -167,6 +168,7 @@ function init() {
   if (!hasColumn('users', 'token_version')) db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
   if (!hasColumn('users', 'totp_secret')) db.exec('ALTER TABLE users ADD COLUMN totp_secret TEXT');
   if (!hasColumn('users', 'totp_enabled')) db.exec('ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0');
+  if (!hasColumn('users', 'must_change_password')) db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
   // Chuẩn hóa trạng thái cũ -> mới
   db.exec("UPDATE orders SET status='Hoàn thành' WHERE status='Đã xong'");
 }

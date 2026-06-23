@@ -151,12 +151,47 @@ async function boot() {
   try {
     const { user } = await api('/me');
     State.user = user;
+    if (user.must_change_password) return renderForceChange();
     State.meta = await api('/meta');
     if (!location.hash) location.hash = '#/dashboard';
     renderShell();
   } catch (e) {
     renderLogin();
   }
+}
+
+// Bắt buộc đổi mật khẩu (lần đăng nhập đầu hoặc sau khi admin reset)
+function renderForceChange() {
+  const app = document.getElementById('app');
+  const oldP = el('input', { type: 'password', placeholder: 'Mật khẩu hiện tại' });
+  const newP = el('input', { type: 'password', placeholder: 'Mật khẩu mới (tối thiểu 4 ký tự)' });
+  const conf = el('input', { type: 'password', placeholder: 'Nhập lại mật khẩu mới' });
+  const submit = async () => {
+    if (newP.value.length < 4) return toast('Mật khẩu mới tối thiểu 4 ký tự', 'err');
+    if (newP.value !== conf.value) return toast('Mật khẩu nhập lại không khớp', 'err');
+    try {
+      await api('/me/password', { method: 'POST', body: { old_password: oldP.value, new_password: newP.value } });
+      toast('Đã đổi mật khẩu 🎉');
+      const { user } = await api('/me');
+      State.user = user;
+      State.meta = await api('/meta');
+      location.hash = '#/dashboard';
+      renderShell();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const form = el('form', { class: 'login-card' },
+    el('div', { class: 'login-logo' }, '🔒'),
+    el('h1', {}, 'Đổi mật khẩu'),
+    el('div', { class: 'sub' }, 'Vì lý do bảo mật, hãy đổi mật khẩu mặc định trước khi sử dụng.'),
+    el('div', { class: 'field' }, el('label', {}, 'Mật khẩu hiện tại'), oldP),
+    el('div', { class: 'field' }, el('label', {}, 'Mật khẩu mới'), newP),
+    el('div', { class: 'field' }, el('label', {}, 'Nhập lại mật khẩu mới'), conf),
+    el('button', { class: 'btn primary', type: 'submit', style: 'width:100%; justify-content:center; padding:11px;' }, 'Đổi mật khẩu & tiếp tục'),
+    el('button', { class: 'btn', type: 'button', style: 'width:100%; justify-content:center; margin-top:8px;', onclick: logout }, 'Đăng xuất'),
+  );
+  form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
+  app.innerHTML = '';
+  app.appendChild(el('div', { class: 'login-wrap' }, form));
 }
 
 function renderLogin() {
@@ -188,6 +223,7 @@ function renderLogin() {
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         State.user = data.user;
+        if (data.user.must_change_password) { renderForceChange(); return; }
         State.meta = await api('/meta');
         location.hash = '#/dashboard';
         renderShell();

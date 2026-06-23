@@ -79,7 +79,7 @@ app.post('/api/login', (req, res) => {
   }
   const token = signToken(user);
   res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 3600 * 1000 });
-  res.json({ user: { id: user.id, username: user.username, full_name: user.full_name, role: user.role, editor_type: user.editor_type } });
+  res.json({ user: { id: user.id, username: user.username, full_name: user.full_name, role: user.role, editor_type: user.editor_type, must_change_password: user.must_change_password } });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -97,7 +97,7 @@ app.post('/api/me/password', authenticate, (req, res) => {
   if (!new_password || new_password.length < 4) return res.status(400).json({ error: 'Mật khẩu mới tối thiểu 4 ký tự' });
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!bcrypt.compareSync(old_password || '', u.password_hash)) return res.status(400).json({ error: 'Mật khẩu cũ không đúng' });
-  db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(bcrypt.hashSync(new_password, 10), req.user.id);
+  db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1, must_change_password = 0 WHERE id = ?').run(bcrypt.hashSync(new_password, 10), req.user.id);
   // Cấp lại token cho chính phiên này để không bị đăng xuất ngay
   const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   res.cookie('token', signToken(fresh), { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 3600 * 1000 });
@@ -386,7 +386,7 @@ app.post('/api/users', authenticate, requireRole('admin'), (req, res) => {
   if (!b.username || !b.full_name || !b.role) return res.status(400).json({ error: 'Thiếu thông tin' });
   if (!['admin', 'ua', 'editor', 'aso', 'po', 'hr'].includes(b.role)) return res.status(400).json({ error: 'Role không hợp lệ' });
   try {
-    const r = db.prepare('INSERT INTO users (username, password_hash, full_name, role, editor_type) VALUES (?,?,?,?,?)').run(
+    const r = db.prepare('INSERT INTO users (username, password_hash, full_name, role, editor_type, must_change_password) VALUES (?,?,?,?,?,1)').run(
       String(b.username).trim().toLowerCase(), bcrypt.hashSync(b.password || '123456', 10),
       b.full_name, b.role, b.role === 'editor' ? (b.editor_type || 'graphic') : null);
     res.json(db.prepare('SELECT id, username, full_name, role, editor_type, active FROM users WHERE id = ?').get(r.lastInsertRowid));
@@ -406,8 +406,8 @@ app.put('/api/users/:id', authenticate, requireRole('admin'), (req, res) => {
     newRole === 'editor' ? (b.editor_type ?? u.editor_type ?? 'graphic') : null,
     b.active != null ? (b.active ? 1 : 0) : u.active, u.id);
   if (b.password) {
-    // Đổi mật khẩu -> tăng token_version để đăng xuất user đó khỏi mọi thiết bị
-    db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(bcrypt.hashSync(b.password, 10), u.id);
+    // Đổi mật khẩu -> tăng token_version (đăng xuất mọi thiết bị) + bắt user đổi lại mật khẩu tạm này
+    db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1, must_change_password = 1 WHERE id = ?').run(bcrypt.hashSync(b.password, 10), u.id);
     // Nếu admin đổi mật khẩu của chính mình thì cấp lại token cho phiên hiện tại
     if (u.id === req.user.id) {
       const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(u.id);

@@ -92,6 +92,9 @@ for (const e of EDITORS) {
   editorById.push({ id: r.lastInsertRowid, type: e.type });
 }
 
+// Nhân viên (không phải admin) phải đổi mật khẩu mặc định ở lần đăng nhập đầu
+db.prepare("UPDATE users SET must_change_password = 1 WHERE role != 'admin'").run();
+
 // ---- Order types ---------------------------------------------------------
 
 const insType = db.prepare(
