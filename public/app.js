@@ -1440,7 +1440,7 @@ function openSizeForm(s, platforms) {
 /* ============================ Reports ============================ */
 
 let reportTab = 'ua';
-let reportRange = 30;          // số ngày, hoặc 'custom'
+let reportRange = 'this_month';  // số ngày, hoặc 'this_month' | 'last_month' | 'custom'
 let reportFrom = '', reportTo = '';
 
 function monthRange(offset) { // 0 = tháng này, -1 = tháng trước
