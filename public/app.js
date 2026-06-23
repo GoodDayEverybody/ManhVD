@@ -381,9 +381,11 @@ async function viewDashboard(c) {
 
 // Dashboard cho Lead: tổng quan toàn bộ order + khối lượng đang làm của team
 async function dashboardLead(c) {
-  const orders = await api('/orders');
+  const { from, to } = computeRange(dashRange);
+  const orders = await api('/orders?from=' + from + '&to=' + to);
   c.innerHTML = '';
   c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name), el('span', { class: 'muted' }, '· Team Creatives')));
+  c.appendChild(dashControls());
   const cnt = (s) => orders.filter(o => o.status === s).length;
   const myPoints = orders.filter(o => o.editor_id === State.user.id).reduce((s, o) => s + (o.points || 0), 0);
   c.appendChild(el('div', { class: 'stat-grid' },
@@ -411,18 +413,43 @@ async function dashboardLead(c) {
   }, 0);
 }
 
+// Định dạng ngày theo giờ ĐỊA PHƯƠNG (tránh lệch ngày do múi giờ +7 với UTC)
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function todayLocal() { return ymd(new Date()); }
+
 function rangeQuery(days) {
   const to = new Date(); const from = new Date(); from.setDate(from.getDate() - days);
-  return `from=${from.toISOString().slice(0, 10)}&to=${to.toISOString().slice(0, 10)}`;
+  return `from=${ymd(from)}&to=${ymd(to)}`;
+}
+
+// Khoảng thời gian cho Dashboard (mặc định Tháng này)
+let dashRange = 'this_month';
+function computeRange(range) {
+  let qs;
+  if (range === 'this_month') qs = monthRange(0);
+  else if (range === 'last_month') qs = monthRange(-1);
+  else qs = rangeQuery(Number(range));
+  const p = new URLSearchParams(qs);
+  return { from: p.get('from'), to: p.get('to') };
+}
+function dashControls() {
+  const { from, to } = computeRange(dashRange);
+  const sel = el('select', { onchange: (e) => { const v = e.target.value; dashRange = /^\d+$/.test(v) ? Number(v) : v; route(); } },
+    [['this_month', 'Tháng này'], ['last_month', 'Tháng trước'], [7, '7 ngày'], [30, '30 ngày'], [90, '90 ngày'], [365, '1 năm']]
+      .map(([v, t]) => el('option', { value: v, selected: String(dashRange) === String(v) }, t)));
+  return el('div', { style: 'display:flex; align-items:center; gap:10px; margin:-4px 0 16px; flex-wrap:wrap' },
+    el('span', { class: 'muted' }, '📅 ' + fmtDate(from) + ' → ' + fmtDate(to)), sel);
 }
 
 async function dashboardAdmin(c) {
-  const q = rangeQuery(30);
+  const { from, to } = computeRange(dashRange);
+  const q = 'from=' + from + '&to=' + to;
   const [summary, uaRep, edRep] = await Promise.all([
     api('/reports/summary?' + q), api('/reports/ua?' + q), api('/reports/editor?' + q),
   ]);
   c.innerHTML = '';
-  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Tổng quan'), el('span', { class: 'muted' }, '· 30 ngày gần nhất')));
+  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Tổng quan')));
+  c.appendChild(dashControls());
 
   c.appendChild(el('div', { class: 'stat-grid' },
     statCard('Tổng order', summary.total_orders, '📋'),
@@ -457,10 +484,12 @@ async function dashboardAdmin(c) {
 
 // Dashboard cho người order (UA/ASO/PO/HR) — tính từ order của chính mình
 async function dashboardOrderer(c) {
-  const orders = await api('/orders');
+  const { from, to } = computeRange(dashRange);
+  const orders = await api('/orders?from=' + from + '&to=' + to);
   c.innerHTML = '';
   c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name),
     el('span', { class: 'spacer' }), el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order mới')));
+  c.appendChild(dashControls());
 
   const cnt = (s) => orders.filter(o => o.status === s).length;
   c.appendChild(el('div', { class: 'stat-grid' },
@@ -487,12 +516,14 @@ async function dashboardOrderer(c) {
 }
 
 async function dashboardEditor(c) {
-  const q = rangeQuery(30);
+  const { from, to } = computeRange(dashRange);
+  const q = 'from=' + from + '&to=' + to;
   const rep = await api('/reports/editor?' + q);
   const orders = await api('/orders');
   const mine = rep.perUser[0] || { total_orders: 0, done_orders: 0, total_points: 0, avg_days: null };
   c.innerHTML = '';
   c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name)));
+  c.appendChild(dashControls());
 
   const todo = orders.filter(o => o.status === 'Chờ làm' || o.status === 'Yêu cầu sửa').length;
   const doing = orders.filter(o => o.status === 'Đang làm').length;
@@ -638,7 +669,10 @@ function renderOrderFilters(apps, managerFilters) {
   const doSearch = () => { orderFilters = { ...pending }; route(); };
 
   wrap.appendChild(fInput('search', 'Tìm kiếm', 'Mã / mô tả', pending, doSearch));
-  wrap.appendChild(fSelect('app_id', 'App', [['', 'Tất cả'], ...(apps || []).map(a => [a.id, a.code + ' - ' + a.name])], pending));
+  // App: dropdown có ô tìm kiếm (nhiều app vẫn tìm nhanh)
+  const appItems = [{ value: '', label: 'Tất cả' }, ...(apps || []).map(a => ({ value: a.id, label: a.code + ' - ' + a.name }))];
+  const appCombo = makeCombo(appItems, pending.app_id || '', 'Tất cả', (v) => { if (v) pending.app_id = v; else delete pending.app_id; });
+  wrap.appendChild(el('div', { class: 'field', style: 'min-width:220px' }, el('label', {}, 'App'), appCombo.node));
   wrap.appendChild(fSelect('status', 'Trạng thái', [['', 'Tất cả'], ...meta.statuses.map(s => [s, s])], pending));
   wrap.appendChild(fSelect('category', 'Loại', [['', 'Tất cả'], ['image', 'Ảnh'], ['video', 'Video']], pending));
   if (managerFilters) {
@@ -869,7 +903,7 @@ async function buildOrderForm(container, order, inline, closeM) {
   );
 
   // Order date = ngày tạo order, không cho chọn
-  const orderDateDefault = order ? (order.order_date || '').slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const orderDateDefault = order ? (order.order_date || '').slice(0, 10) : todayLocal();
   const orderDateDisplay = el('input', { type: 'text', value: fmtDate(orderDateDefault), disabled: true });
 
   const desc = el('textarea', { placeholder: 'Mô tả chi tiết yêu cầu...' }, order ? order.description || '' : '');
@@ -1413,7 +1447,7 @@ function monthRange(offset) { // 0 = tháng này, -1 = tháng trước
   const now = new Date();
   const first = new Date(now.getFullYear(), now.getMonth() + offset, 1);
   const last = new Date(now.getFullYear(), now.getMonth() + offset + 1, 0);
-  const fmt = (d) => d.toISOString().slice(0, 10);
+  const fmt = (d) => ymd(d);
   return `from=${fmt(first)}&to=${fmt(last)}`;
 }
 function reportRangeQuery() {
