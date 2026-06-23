@@ -638,9 +638,11 @@ async function viewOrders(c, opts = {}) {
   if (assignedToMe) query.editor_id = State.user.id;
   if (managed) query.managed = 1;
   const qs = new URLSearchParams(query).toString();
+  // Bộ lọc App: UA/PO chỉ thấy app được giao
+  const appsEndpoint = (role === 'ua' || role === 'po') ? '/apps?assigned=1' : '/apps';
   const [orders, apps] = await Promise.all([
     api('/orders' + (qs ? '?' + qs : '')),
-    api('/apps'),
+    api(appsEndpoint),
   ]);
 
   c.innerHTML = '';

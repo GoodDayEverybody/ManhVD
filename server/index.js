@@ -194,6 +194,12 @@ app.get('/api/apps', authenticate, (req, res) => {
       sql += ' JOIN app_users au ON au.app_id = a.id AND au.user_id = ?';
       params.push(req.user.id);
     }
+  } else if (req.query.assigned === '1') {
+    // Danh sách app để lọc: UA/PO chỉ thấy app mình được giao (mọi trạng thái)
+    if (req.user.role === 'ua' || req.user.role === 'po') {
+      sql += ' JOIN app_users au ON au.app_id = a.id AND au.user_id = ?';
+      params.push(req.user.id);
+    }
   } else if (req.query.status) { where.push('a.status = ?'); params.push(req.query.status); }
   else if (req.query.active === '1') { where.push("a.status IN ('Đang chạy','Đợi bàn giao')"); }
   if (where.length) sql += ' WHERE ' + where.join(' AND ');
