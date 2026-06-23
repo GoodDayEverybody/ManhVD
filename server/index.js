@@ -46,7 +46,9 @@ const ORDER_SELECT = `
          t.name            AS order_type_name,
          t.points          AS type_points,
          t.quantity_note   AS quantity_note,
-         a.code            AS app_code
+         a.code            AS app_code,
+         a.link            AS app_link,
+         a.figma_link      AS app_figma
   FROM orders o
   LEFT JOIN users ua  ON ua.id = o.ua_id
   LEFT JOIN users ed  ON ed.id = o.editor_id

@@ -784,7 +784,8 @@ async function openOrderDetail(id) {
   add('Mô tả chi tiết', o.description);
   if (o.note_request) add('Lưu ý (UA)', o.note_request);
   if (o.ref_link) add('Ref link', el('a', { href: o.ref_link, target: '_blank' }, o.ref_link));
-  if (o.link_figma) add('Link App/Figma', el('a', { href: o.link_figma, target: '_blank' }, o.link_figma));
+  if (o.app_link) add('Link App', el('a', { href: o.app_link, target: '_blank' }, o.app_link));
+  if (o.app_figma || o.link_figma) add('Link Figma', el('a', { href: o.app_figma || o.link_figma, target: '_blank' }, o.app_figma || o.link_figma));
   if (o.drive_link) add('Link Drive', el('a', { href: o.drive_link, target: '_blank' }, o.drive_link));
   if (o.youtube_link) add('Link Youtube', el('a', { href: o.youtube_link, target: '_blank' }, o.youtube_link));
   if (o.note) add('Note (Editor)', o.note);
@@ -1147,13 +1148,15 @@ async function viewApps(c) {
     el('span', { class: 'spacer' }), el('button', { class: 'btn primary', onclick: () => openAppForm(null) }, '➕ Thêm app')));
 
   const table = el('table', {},
-    el('thead', {}, el('tr', {}, el('th', {}, 'Mã app'), el('th', {}, 'Tên app'), el('th', {}, 'Đối tác'), el('th', {}, 'UA'), el('th', {}, 'PO'), el('th', {}, 'Tình trạng'), el('th', {}, ''))),
+    el('thead', {}, el('tr', {}, el('th', {}, 'Mã app'), el('th', {}, 'Tên app'), el('th', {}, 'Đối tác'), el('th', {}, 'UA'), el('th', {}, 'PO'), el('th', {}, 'Link App'), el('th', {}, 'Link Figma'), el('th', {}, 'Tình trạng'), el('th', {}, ''))),
     el('tbody', {}, apps.map(a => el('tr', {},
       el('td', {}, el('span', { class: 'code-cell' }, a.code)),
       el('td', {}, a.link ? el('a', { href: a.link, target: '_blank' }, a.name) : a.name),
       el('td', {}, a.partner || '—'),
       el('td', {}, (a.uas && a.uas.length) ? a.uas.map(u => u.full_name).join(', ') : (a.mkter || '—')),
       el('td', {}, (a.pos && a.pos.length) ? a.pos.map(u => u.full_name).join(', ') : (a.product_manager || '—')),
+      el('td', {}, a.link ? el('a', { href: a.link, target: '_blank' }, '🔗 Store') : '—'),
+      el('td', {}, a.figma_link ? el('a', { href: a.figma_link, target: '_blank' }, '🎨 Figma') : '—'),
       el('td', {}, appStatusBadge(a.status)),
       el('td', { class: 'nowrap' },
         el('button', { class: 'btn sm', onclick: () => openAppForm(a) }, '✏️'),
