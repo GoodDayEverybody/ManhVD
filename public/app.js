@@ -161,12 +161,17 @@ async function boot() {
 
 function renderLogin() {
   const app = document.getElementById('app');
+  const codeField = el('div', { class: 'field', style: 'display:none' },
+    el('label', {}, 'Mã xác thực (2FA)'),
+    el('input', { id: 'lg-code', inputmode: 'numeric', placeholder: 'Mã 6 số từ app Authenticator' }),
+    el('div', { class: 'hint' }, 'Mở Google Authenticator và nhập mã 6 số.'));
   const form = el('form', { class: 'login-card' },
     el('div', { class: 'login-logo' }, '🎨'),
     el('h1', {}, 'Order Creatives'),
     el('div', { class: 'sub' }, 'Hệ thống quản lý order ảnh & video quảng cáo'),
     el('div', { class: 'field' }, el('label', {}, 'Tên đăng nhập'), el('input', { id: 'lg-user', autofocus: true, placeholder: 'vd: admin, manhvd, khai' })),
     el('div', { class: 'field' }, el('label', {}, 'Mật khẩu'), el('input', { id: 'lg-pass', type: 'password', placeholder: '••••••' })),
+    codeField,
     el('button', { class: 'btn primary', type: 'submit', style: 'width:100%; justify-content:center; padding:11px;' }, 'Đăng nhập'),
     el('div', { class: 'login-hint' }, 'Demo: admin / admin123 — UA: manhvd / 123456 — Editor: khai / 123456'),
   );
@@ -174,13 +179,28 @@ function renderLogin() {
     e.preventDefault();
     const username = document.getElementById('lg-user').value;
     const password = document.getElementById('lg-pass').value;
+    const code = document.getElementById('lg-code').value;
     try {
-      const { user } = await api('/login', { method: 'POST', body: { username, password } });
-      State.user = user;
-      State.meta = await api('/meta');
-      location.hash = '#/dashboard';
-      renderShell();
-    } catch (err) { toast(err.message, 'err'); }
+      const res = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, code: code || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        State.user = data.user;
+        State.meta = await api('/meta');
+        location.hash = '#/dashboard';
+        renderShell();
+        return;
+      }
+      if (data.twofa_required) {
+        codeField.style.display = '';
+        document.getElementById('lg-code').focus();
+        toast(data.error || 'Nhập mã xác thực 2FA để tiếp tục', 'info');
+        return;
+      }
+      toast(data.error || 'Đăng nhập thất bại', 'err');
+    } catch (err) { toast('Lỗi kết nối', 'err'); }
   });
   app.innerHTML = '';
   app.appendChild(el('div', { class: 'login-wrap' }, form));
@@ -239,7 +259,8 @@ function renderShell() {
     el('div', { class: 'user-box' },
       el('div', { class: 'name' }, u.full_name),
       el('div', { class: 'role' }, u.role === 'editor' ? editorTypeLabel(u.editor_type) : (SIMPLE_ROLE_LABEL[u.role] || u.role)),
-      el('button', { class: 'btn sm', style: 'margin-top:10px; width:100%; justify-content:center;', onclick: logout }, 'Đăng xuất'),
+      el('a', { class: 'btn sm', href: '#/security', style: 'margin-top:10px; width:100%; justify-content:center;' }, '🔒 Bảo mật'),
+      el('button', { class: 'btn sm', style: 'margin-top:6px; width:100%; justify-content:center;', onclick: logout }, 'Đăng xuất'),
     ),
   );
 
@@ -273,7 +294,9 @@ const ROUTES = {
   users: viewUsers,
   reports: viewReports,
   settings: viewSettings,
+  security: viewSecurity,
 };
+const ALWAYS_ALLOWED = ['dashboard', 'security'];
 
 async function refreshMeta() { State.meta = await api('/meta'); }
 
@@ -287,7 +310,7 @@ function route() {
   const key = hash.split('/')[0];
   const allowed = navFor(State.user).map(n => n[0].replace('#/', ''));
   const fn = ROUTES[key];
-  if (!fn || (!allowed.includes(key) && key !== 'dashboard')) { location.hash = '#/dashboard'; return; }
+  if (!fn || (!allowed.includes(key) && !ALWAYS_ALLOWED.includes(key))) { location.hash = '#/dashboard'; return; }
   setActiveNav(location.hash);
   const content = document.getElementById('content');
   content.innerHTML = '<div class="spinner"></div>';
@@ -1000,13 +1023,17 @@ async function viewUsers(c) {
   const roleLabel = roleBadge;
 
   const table = el('table', {},
-    el('thead', {}, el('tr', {}, el('th', {}, 'Họ tên'), el('th', {}, 'Username'), el('th', {}, 'Vai trò'), el('th', {}, 'Trạng thái'), el('th', {}, ''))),
+    el('thead', {}, el('tr', {}, el('th', {}, 'Họ tên'), el('th', {}, 'Username'), el('th', {}, 'Vai trò'), el('th', {}, '2FA'), el('th', {}, 'Trạng thái'), el('th', {}, ''))),
     el('tbody', {}, users.map(u => el('tr', { style: u.active ? '' : 'opacity:.5' },
       el('td', {}, u.full_name),
       el('td', {}, el('code', {}, u.username)),
       el('td', {}, roleLabel(u)),
+      el('td', {}, u.totp_enabled ? el('span', { class: 'badge green' }, '🔐 Bật') : el('span', { class: 'badge gray' }, 'Tắt')),
       el('td', {}, u.active ? el('span', { class: 'badge green' }, 'Hoạt động') : el('span', { class: 'badge gray' }, 'Đã khóa')),
-      el('td', { class: 'nowrap' }, el('button', { class: 'btn sm', onclick: () => openUserForm(u) }, '✏️')),
+      el('td', { class: 'nowrap' },
+        el('button', { class: 'btn sm', onclick: () => openUserForm(u) }, '✏️'),
+        u.totp_enabled ? el('button', { class: 'btn sm', title: 'Reset 2FA (mất điện thoại)', style: 'margin-left:6px', onclick: () => confirmDialog('Reset (tắt) 2FA của ' + u.full_name + '? Họ sẽ đăng nhập chỉ bằng mật khẩu cho tới khi bật lại.', async () => { await api('/users/' + u.id + '/reset-2fa', { method: 'POST' }); toast('Đã reset 2FA'); route(); }) }, '🔓 Reset 2FA') : null,
+      ),
     ))),
   );
   c.appendChild(el('div', { class: 'table-wrap' }, table));
@@ -1042,6 +1069,87 @@ function openUserForm(u, presetRole) {
     } catch (e) { toast(e.message, 'err'); }
   };
   const closeM = openModal({ title: u ? 'Sửa user' : 'Thêm user', body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '💾 Lưu')] });
+}
+
+/* ============================ Bảo mật ============================ */
+
+async function viewSecurity(c) {
+  setTitle('Bảo mật');
+  const { user } = await api('/me');
+  c.innerHTML = '';
+  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Bảo mật tài khoản')));
+
+  // --- Đổi mật khẩu ---
+  const oldP = el('input', { type: 'password', placeholder: 'Mật khẩu hiện tại' });
+  const newP = el('input', { type: 'password', placeholder: 'Mật khẩu mới (tối thiểu 4 ký tự)' });
+  const conf = el('input', { type: 'password', placeholder: 'Nhập lại mật khẩu mới' });
+  const changePw = async () => {
+    if (newP.value.length < 4) return toast('Mật khẩu mới tối thiểu 4 ký tự', 'err');
+    if (newP.value !== conf.value) return toast('Mật khẩu nhập lại không khớp', 'err');
+    try {
+      await api('/me/password', { method: 'POST', body: { old_password: oldP.value, new_password: newP.value } });
+      toast('Đã đổi mật khẩu'); oldP.value = newP.value = conf.value = '';
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  c.appendChild(el('div', { class: 'card card-pad', style: 'max-width:560px; margin-bottom:18px' },
+    el('h3', {}, '🔑 Đổi mật khẩu'),
+    el('div', { class: 'field' }, el('label', {}, 'Mật khẩu hiện tại'), oldP),
+    el('div', { class: 'form-row' },
+      el('div', { class: 'field' }, el('label', {}, 'Mật khẩu mới'), newP),
+      el('div', { class: 'field' }, el('label', {}, 'Nhập lại'), conf)),
+    el('button', { class: 'btn primary', onclick: changePw }, '💾 Đổi mật khẩu'),
+  ));
+
+  // --- 2FA ---
+  const twofaCard = el('div', { class: 'card card-pad', style: 'max-width:560px' });
+  c.appendChild(twofaCard);
+  renderTwofa(twofaCard, user.totp_enabled);
+}
+
+function renderTwofa(card, enabled) {
+  card.innerHTML = '';
+  card.appendChild(el('h3', {}, '🔐 Xác thực 2 lớp (2FA)'));
+  card.appendChild(el('p', { class: 'hint', style: 'margin-bottom:12px' },
+    'Dùng app Google Authenticator (hoặc Authy, Microsoft Authenticator). Khi bật, mỗi lần đăng nhập cần thêm mã 6 số — kẻ gian biết mật khẩu vẫn không vào được.'));
+
+  if (enabled) {
+    card.appendChild(el('div', { style: 'margin-bottom:12px' }, el('span', { class: 'badge green' }, '✅ Đang bật')));
+    const code = el('input', { inputmode: 'numeric', placeholder: 'Nhập mã 6 số để tắt', style: 'max-width:240px' });
+    const disable = async () => {
+      try { await api('/me/2fa/disable', { method: 'POST', body: { code: code.value } }); toast('Đã tắt 2FA'); renderTwofa(card, false); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    card.appendChild(el('div', { class: 'field' }, el('label', {}, 'Tắt 2FA (cần mã hiện tại)'), code));
+    card.appendChild(el('button', { class: 'btn danger', onclick: disable }, 'Tắt 2FA'));
+    return;
+  }
+
+  card.appendChild(el('div', { style: 'margin-bottom:12px' }, el('span', { class: 'badge gray' }, 'Chưa bật')));
+  const startBtn = el('button', { class: 'btn primary', onclick: async () => {
+    try {
+      const data = await api('/me/2fa/setup', { method: 'POST' });
+      showSetup(card, data);
+    } catch (e) { toast(e.message, 'err'); }
+  } }, '🔐 Bật 2FA');
+  card.appendChild(startBtn);
+}
+
+function showSetup(card, data) {
+  card.innerHTML = '';
+  card.appendChild(el('h3', {}, '🔐 Thiết lập 2FA'));
+  card.appendChild(el('ol', { class: 'hint', style: 'margin:0 0 12px 18px; line-height:1.9' },
+    el('li', {}, 'Mở app Authenticator → thêm tài khoản → quét mã QR bên dưới.'),
+    el('li', {}, 'Nhập mã 6 số đang hiện trong app rồi bấm Xác nhận.')));
+  card.appendChild(el('img', { src: data.qr, alt: 'QR', style: 'width:180px; height:180px; border:1px solid var(--border); border-radius:8px' }));
+  card.appendChild(el('div', { class: 'hint', style: 'margin:8px 0' }, 'Không quét được? Nhập tay mã bí mật: ', el('code', {}, data.secret)));
+  const code = el('input', { inputmode: 'numeric', placeholder: 'Mã 6 số', style: 'max-width:240px' });
+  const confirm = async () => {
+    try { await api('/me/2fa/enable', { method: 'POST', body: { code: code.value } }); toast('Đã bật 2FA 🎉'); renderTwofa(card, true); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  card.appendChild(el('div', { class: 'field', style: 'margin-top:10px' }, el('label', {}, 'Mã xác nhận'), code));
+  card.appendChild(el('div', {}, el('button', { class: 'btn primary', onclick: confirm }, '✅ Xác nhận & Bật'),
+    ' ', el('button', { class: 'btn', onclick: () => renderTwofa(card, false) }, 'Hủy')));
 }
 
 /* ============================ Cài đặt ============================ */

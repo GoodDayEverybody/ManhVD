@@ -34,7 +34,7 @@ function authenticate(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Chưa đăng nhập' });
   try {
     const payload = jwt.verify(token, SECRET);
-    const user = db.prepare('SELECT id, username, full_name, role, editor_type, active, token_version FROM users WHERE id = ?').get(payload.id);
+    const user = db.prepare('SELECT id, username, full_name, role, editor_type, active, token_version, totp_enabled FROM users WHERE id = ?').get(payload.id);
     if (!user || !user.active) return res.status(401).json({ error: 'Tài khoản không hợp lệ' });
     // Phiên cũ bị vô hiệu khi mật khẩu bị đổi (token_version tăng)
     if ((payload.tv || 0) !== (user.token_version || 0)) return res.status(401).json({ error: 'Phiên đã hết hạn, vui lòng đăng nhập lại' });

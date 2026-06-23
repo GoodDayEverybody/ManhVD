@@ -4,9 +4,14 @@ const path = require('path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
+const { authenticator } = require('otplib');
+const QRCode = require('qrcode');
 
 const { db, init, nextOrderCode } = require('./db');
 const { signToken, authenticate, requireRole } = require('./auth');
+
+// 2FA cho phép lệch ±1 bước thời gian (30s) để tránh kẹt do lệch giờ
+authenticator.options = { window: 1 };
 
 init();
 
@@ -60,11 +65,17 @@ function todayStr() {
 // ---- Auth routes ---------------------------------------------------------
 
 app.post('/api/login', (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, code } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Thiếu thông tin đăng nhập' });
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username).trim().toLowerCase());
   if (!user || !user.active || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu' });
+  }
+  // Nếu user đã bật 2FA: cần thêm mã từ app Authenticator
+  if (user.totp_enabled && user.totp_secret) {
+    if (!code) return res.status(401).json({ twofa_required: true });
+    const ok = authenticator.check(String(code).replace(/\s/g, ''), user.totp_secret);
+    if (!ok) return res.status(401).json({ twofa_required: true, error: 'Mã xác thực không đúng' });
   }
   const token = signToken(user);
   res.cookie('token', token, { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 3600 * 1000 });
@@ -90,6 +101,46 @@ app.post('/api/me/password', authenticate, (req, res) => {
   // Cấp lại token cho chính phiên này để không bị đăng xuất ngay
   const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   res.cookie('token', signToken(fresh), { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 3600 * 1000 });
+  res.json({ ok: true });
+});
+
+// ---- 2FA (TOTP) ----------------------------------------------------------
+
+// Bước 1: tạo secret + QR để quét vào app Authenticator (chưa bật)
+app.post('/api/me/2fa/setup', authenticate, async (req, res) => {
+  const secret = authenticator.generateSecret();
+  db.prepare('UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?').run(secret, req.user.id);
+  const otpauth = authenticator.keyuri(req.user.username, 'Order Creatives', secret);
+  const qr = await QRCode.toDataURL(otpauth);
+  res.json({ secret, otpauth, qr });
+});
+
+// Bước 2: nhập mã để xác nhận và bật 2FA
+app.post('/api/me/2fa/enable', authenticate, (req, res) => {
+  const code = String((req.body && req.body.code) || '').replace(/\s/g, '');
+  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!u.totp_secret) return res.status(400).json({ error: 'Chưa tạo mã 2FA. Hãy bấm "Bật 2FA" trước.' });
+  if (!authenticator.check(code, u.totp_secret)) return res.status(400).json({ error: 'Mã không đúng, thử lại.' });
+  db.prepare('UPDATE users SET totp_enabled = 1 WHERE id = ?').run(req.user.id);
+  res.json({ ok: true });
+});
+
+// Tắt 2FA (cần mã hiện tại)
+app.post('/api/me/2fa/disable', authenticate, (req, res) => {
+  const code = String((req.body && req.body.code) || '').replace(/\s/g, '');
+  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (u.totp_enabled && (!u.totp_secret || !authenticator.check(code, u.totp_secret))) {
+    return res.status(400).json({ error: 'Mã không đúng.' });
+  }
+  db.prepare('UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?').run(req.user.id);
+  res.json({ ok: true });
+});
+
+// Admin reset 2FA cho user (vd nhân viên mất điện thoại)
+app.post('/api/users/:id/reset-2fa', authenticate, requireRole('admin'), (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  if (!u) return res.status(404).json({ error: 'Không tìm thấy user' });
+  db.prepare('UPDATE users SET totp_enabled = 0, totp_secret = NULL WHERE id = ?').run(u.id);
   res.json({ ok: true });
 });
 
@@ -323,7 +374,7 @@ app.delete('/api/orders/:id', authenticate, requireRole('admin'), (req, res) => 
 // ---- Users (admin) -------------------------------------------------------
 
 app.get('/api/users', authenticate, requireRole('admin'), (req, res) => {
-  let sql = 'SELECT id, username, full_name, role, editor_type, active, created_at FROM users';
+  let sql = 'SELECT id, username, full_name, role, editor_type, active, totp_enabled, created_at FROM users';
   const params = [];
   if (req.query.role) { sql += ' WHERE role = ?'; params.push(req.query.role); }
   sql += ' ORDER BY role, full_name';
