@@ -345,6 +345,45 @@ const ALWAYS_ALLOWED = ['dashboard', 'security'];
 
 async function refreshMeta() { State.meta = await api('/meta'); }
 
+/* ---- CSV (nhập dữ liệu Excel) ---- */
+function deburr(s) {
+  return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D')
+    .toLowerCase().trim().replace(/\s+/g, ' ');
+}
+function parseCSV(text) {
+  text = text.replace(/^﻿/, '');
+  const head = text.slice(0, (text.indexOf('\n') + 1) || text.length);
+  const delim = (head.split(';').length > head.split(',').length) ? ';' : ',';
+  const rows = []; let field = '', row = [], q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === delim) { row.push(field); field = ''; }
+    else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (ch !== '\r') field += ch;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(c => String(c).trim() !== ''));
+}
+function csvToObjects(text, headerMap) {
+  const rows = parseCSV(text);
+  if (!rows.length) return [];
+  const headers = rows[0].map(h => headerMap[deburr(h)] || null);
+  return rows.slice(1).map(r => {
+    const o = {};
+    headers.forEach((key, i) => { if (key) o[key] = (r[i] || '').trim(); });
+    return o;
+  });
+}
+function downloadText(filename, content) {
+  const blob = new Blob(['﻿' + content], { type: 'text/csv;charset=utf-8;' });
+  const a = el('a', { href: URL.createObjectURL(blob), download: filename });
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
 function route() {
   if (!State.user) return;
   destroyCharts();
@@ -1267,7 +1306,7 @@ async function viewSettings(c) {
   c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Cài đặt'),
     el('span', { class: 'muted' }, '· dữ liệu nguồn cho các ô chọn ở những trang khác')));
 
-  const TABS = [['ua', '👤 UA'], ['editor', '🎨 Editor'], ['partner', '🤝 Đối tác'], ['image', '🖼️ Loại order ảnh'], ['video', '🎬 Loại order video'], ['sizes', '📐 Size ảnh']];
+  const TABS = [['ua', '👤 UA'], ['editor', '🎨 Editor'], ['partner', '🤝 Đối tác'], ['image', '🖼️ Loại order ảnh'], ['video', '🎬 Loại order video'], ['sizes', '📐 Size ảnh'], ['import', '📥 Nhập dữ liệu']];
   c.appendChild(el('div', { class: 'tabs' }, TABS.map(([k, label]) =>
     el('button', { class: settingsTab === k ? 'active' : '', onclick: () => { settingsTab = k; route(); } }, label))));
 
@@ -1278,7 +1317,60 @@ async function viewSettings(c) {
   else if (settingsTab === 'partner') await settingsPartners(box);
   else if (settingsTab === 'image') await settingsTypes(box, 'image');
   else if (settingsTab === 'video') await settingsTypes(box, 'video');
-  else await settingsSizes(box);
+  else if (settingsTab === 'sizes') await settingsSizes(box);
+  else settingsImport(box);
+}
+
+const APP_CSV_HEADERS = { 'ma app': 'code', 'ten app': 'name', 'doi tac': 'partner', 'link app': 'link', 'link figma': 'figma_link', 'ua': 'mkter', 'po': 'product_manager', 'tinh trang': 'status' };
+const USER_CSV_HEADERS = { 'ho ten': 'full_name', 'username': 'username', 'vai tro': 'role_label', 'mat khau': 'password' };
+
+function settingsImport(box) {
+  box.innerHTML = '';
+  box.appendChild(el('p', { class: 'hint', style: 'margin-bottom:14px' },
+    'Cách dùng: bấm "Tải file mẫu", mở bằng Excel rồi điền dữ liệu. Lưu lại dạng ', el('b', {}, 'CSV UTF-8'), ' rồi chọn file và bấm "Nhập".'));
+
+  const card = (title, sampleName, sampleContent, headerMap, endpoint, note) => {
+    const fileInput = el('input', { type: 'file', accept: '.csv,text/csv' });
+    const result = el('div', { style: 'margin-top:10px' });
+    const doImport = () => {
+      const f = fileInput.files && fileInput.files[0];
+      if (!f) return toast('Chọn file CSV trước', 'err');
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const rows = csvToObjects(reader.result, headerMap);
+        if (!rows.length) return toast('File không có dữ liệu', 'err');
+        try {
+          const res = await api(endpoint, { method: 'POST', body: { rows } });
+          result.innerHTML = '';
+          result.appendChild(el('div', { class: 'badge green' }, '✅ Thêm mới: ' + (res.created || 0) + (res.updated != null ? ' · Cập nhật: ' + res.updated : '')));
+          if (res.errors && res.errors.length) {
+            result.appendChild(el('div', { style: 'margin-top:8px' }, el('div', { class: 'muted', style: 'font-weight:600;margin-bottom:4px' }, 'Bỏ qua ' + res.errors.length + ' dòng:'),
+              el('ul', { style: 'margin:0 0 0 18px; color:var(--danger); font-size:13px' }, res.errors.slice(0, 30).map(e => el('li', {}, e)))));
+          }
+          toast('Đã nhập xong'); await refreshMeta();
+        } catch (e) { toast(e.message, 'err'); }
+      };
+      reader.readAsText(f, 'utf-8');
+    };
+    return el('div', { class: 'card card-pad', style: 'max-width:640px; margin-bottom:16px' },
+      el('h3', {}, title),
+      note ? el('p', { class: 'hint', style: 'margin-bottom:10px' }, note) : null,
+      el('button', { class: 'btn', onclick: () => downloadText(sampleName, sampleContent) }, '⬇️ Tải file mẫu'),
+      el('div', { class: 'field', style: 'margin-top:12px' }, el('label', {}, 'Chọn file CSV đã điền'), fileInput),
+      el('button', { class: 'btn primary', onclick: doImport }, '📥 Nhập'),
+      result,
+    );
+  };
+
+  box.appendChild(card('📱 Nhập danh sách App', 'mau-app.csv',
+    'Mã app,Tên app,Đối tác,Link app,Link Figma,UA,PO,Tình trạng\nQIP100,Caller ID,Yutalabs,https://play.google.com/store/apps/details?id=...,https://figma.com/file/...,ManhVD,BaoDX,Đang chạy\n',
+    APP_CSV_HEADERS, '/import/apps',
+    'Trùng Mã app sẽ được cập nhật, chưa có thì thêm mới. Tình trạng: Đang chạy / Đợi bàn giao / Dừng.'));
+
+  box.appendChild(card('👥 Nhập danh sách User', 'mau-user.csv',
+    'Họ tên,Username,Vai trò,Mật khẩu\nNguyễn Văn A,,UA,\nTrần Thị B,,Graphic Designer,\n',
+    USER_CSV_HEADERS, '/import/users',
+    'Vai trò: UA / ASO / PO / HR / Admin / Graphic Designer / Video Editor / Video Editor Lead / UI/UX Designer. Username để trống sẽ tự tạo; Mật khẩu trống = 123456 (bắt đổi lần đầu).'));
 }
 
 async function settingsPartners(box) {

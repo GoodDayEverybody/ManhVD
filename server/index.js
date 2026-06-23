@@ -523,6 +523,79 @@ app.delete('/api/partners/:id', authenticate, requireRole('admin'), (req, res) =
   res.json({ ok: true });
 });
 
+// ---- Nhập dữ liệu hàng loạt (Excel/CSV) -----------------------------------
+
+function slugify(name) {
+  return String(name).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function parseRoleLabel(label) {
+  const t = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const map = {
+    'ua': ['ua', null], 'aso': ['aso', null], 'po': ['po', null], 'hr': ['hr', null], 'admin': ['admin', null],
+    'graphic designer': ['editor', 'graphic'], 'graphic': ['editor', 'graphic'], 'designer': ['editor', 'graphic'],
+    'video editor': ['editor', 'video'], 'video': ['editor', 'video'],
+    'video editor lead': ['editor', 'video_lead'], 'lead': ['editor', 'video_lead'],
+    'ui/ux designer': ['editor', 'uiux'], 'ui ux designer': ['editor', 'uiux'], 'uiux': ['editor', 'uiux'], 'ui/ux': ['editor', 'uiux'],
+  };
+  return map[t] || null;
+}
+
+app.post('/api/import/apps', authenticate, requireRole('admin'), (req, res) => {
+  const rows = (req.body && req.body.rows) || [];
+  let created = 0, updated = 0; const errors = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || {};
+    const code = String(r.code || '').trim();
+    const name = String(r.name || '').trim();
+    if (!code || !name) { errors.push('Dòng ' + (i + 2) + ': thiếu Mã app hoặc Tên app'); continue; }
+    let status = String(r.status || '').trim();
+    if (!APP_STATUSES.includes(status)) status = 'Đang chạy';
+    const app_code = code + ' - ' + name;
+    try {
+      const ex = db.prepare('SELECT id FROM apps WHERE code = ?').get(code);
+      if (ex) {
+        db.prepare('UPDATE apps SET name=?,partner=?,link=?,figma_link=?,app_code=?,mkter=?,product_manager=?,status=? WHERE id=?')
+          .run(name, r.partner || '', r.link || '', r.figma_link || '', app_code, r.mkter || '', r.product_manager || '', status, ex.id);
+        updated++;
+      } else {
+        db.prepare('INSERT INTO apps (code,name,partner,link,figma_link,app_code,mkter,product_manager,status) VALUES (?,?,?,?,?,?,?,?,?)')
+          .run(code, name, r.partner || '', r.link || '', r.figma_link || '', app_code, r.mkter || '', r.product_manager || '', status);
+        created++;
+      }
+    } catch (e) { errors.push('Dòng ' + (i + 2) + ': ' + e.message); }
+  }
+  res.json({ created, updated, errors });
+});
+
+app.post('/api/import/users', authenticate, requireRole('admin'), (req, res) => {
+  const rows = (req.body && req.body.rows) || [];
+  let created = 0; const errors = [];
+  const taken = new Set(db.prepare('SELECT username FROM users').all().map(u => u.username));
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] || {};
+    const full_name = String(r.full_name || '').trim();
+    if (!full_name) { errors.push('Dòng ' + (i + 2) + ': thiếu Họ tên'); continue; }
+    const rp = parseRoleLabel(r.role_label);
+    if (!rp) { errors.push('Dòng ' + (i + 2) + ': vai trò không hợp lệ ("' + (r.role_label || '') + '")'); continue; }
+    let username = String(r.username || '').trim().toLowerCase();
+    if (username) {
+      if (taken.has(username)) { errors.push('Dòng ' + (i + 2) + ': username "' + username + '" đã tồn tại, bỏ qua'); continue; }
+    } else {
+      const base = slugify(full_name) || 'user';
+      let u = base, n = 2; while (taken.has(u)) { u = base + n; n++; } username = u;
+    }
+    taken.add(username);
+    const pw = String(r.password || '').trim() || '123456';
+    try {
+      db.prepare('INSERT INTO users (username,password_hash,full_name,role,editor_type,must_change_password) VALUES (?,?,?,?,?,1)')
+        .run(username, bcrypt.hashSync(pw, 10), full_name, rp[0], rp[1]);
+      created++;
+    } catch (e) { errors.push('Dòng ' + (i + 2) + ': ' + e.message); }
+  }
+  res.json({ created, errors });
+});
+
 // ---- Reports -------------------------------------------------------------
 
 function dateRange(q) {
