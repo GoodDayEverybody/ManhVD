@@ -276,9 +276,10 @@ const ORDERER_NAV = [
   ['#/orders', '📋', 'Order của tôi'],
 ];
 ['aso', 'po', 'hr'].forEach(r => { NAV[r] = ORDERER_NAV; });
-// Lead: quản lý order như Admin + báo cáo team
+// Lead: vừa làm order được giao, vừa quản lý/xem order của team + báo cáo
 const LEAD_NAV = [
   ['#/dashboard', '📊', 'Tổng quan'],
+  ['#/assigned', '📥', 'Order được giao'],
   ['#/orders', '📋', 'Quản lý Order'],
   ['#/reports', '📈', 'Báo cáo'],
 ];
@@ -325,6 +326,7 @@ function setActiveNav(hash) {
 const ROUTES = {
   dashboard: viewDashboard,
   orders: viewOrders,
+  assigned: (c) => viewOrders(c, { assignedToMe: true }),
   new: viewNewOrder,
   apps: viewApps,
   users: viewUsers,
@@ -534,15 +536,24 @@ function barOpts() { return { responsive: true, maintainAspectRatio: false, plug
 
 let orderFilters = {};
 
-async function viewOrders(c) {
+async function viewOrders(c, opts = {}) {
   const role = State.user.role;
   const lead = isLeadUser(State.user);
-  const canManage = role === 'admin' || lead;
-  const title = lead ? 'Quản lý Order' : role === 'editor' ? 'Order được giao' : isOrdererRole(role) ? 'Order của tôi' : 'Quản lý Order';
+  const assignedToMe = !!opts.assignedToMe;            // tab "Order được giao" của Lead
+  const canManage = (role === 'admin' || lead) && !assignedToMe;
+  const title = assignedToMe ? 'Order được giao'
+    : lead ? 'Quản lý Order'
+    : role === 'editor' ? 'Order được giao'
+    : isOrdererRole(role) ? 'Order của tôi' : 'Quản lý Order';
   setTitle(title);
 
-  const qs = new URLSearchParams(orderFilters).toString();
-  const orders = await api('/orders' + (qs ? '?' + qs : ''));
+  const query = { ...orderFilters };
+  if (assignedToMe) query.editor_id = State.user.id;
+  const qs = new URLSearchParams(query).toString();
+  const [orders, apps] = await Promise.all([
+    api('/orders' + (qs ? '?' + qs : '')),
+    api('/apps'),
+  ]);
 
   c.innerHTML = '';
   const head = el('div', { class: 'page-head' },
@@ -566,7 +577,7 @@ async function viewOrders(c) {
     ));
   }
 
-  c.appendChild(renderOrderFilters());
+  c.appendChild(renderOrderFilters(apps, (role === 'admin' || lead) && !assignedToMe));
 
   if (!orders.length) {
     c.appendChild(el('div', { class: 'card' }, el('div', { class: 'empty' }, el('div', { class: 'ico' }, '📭'), 'Chưa có order nào')));
@@ -597,45 +608,47 @@ async function viewOrders(c) {
   c.appendChild(el('div', { class: 'table-wrap' }, table));
 }
 
-function renderOrderFilters() {
+function renderOrderFilters(apps, managerFilters) {
   const wrap = el('div', { class: 'filters' });
   const meta = State.meta;
-  const role = State.user.role;
+  const pending = { ...orderFilters };
 
-  const apply = () => { route(); };
+  const doSearch = () => { orderFilters = { ...pending }; route(); };
 
-  wrap.appendChild(filterInput('search', 'Tìm kiếm', 'Mã / app / mô tả', apply));
-  wrap.appendChild(filterSelect('status', 'Trạng thái', [['', 'Tất cả'], ...meta.statuses.map(s => [s, s])], apply));
-  wrap.appendChild(filterSelect('category', 'Loại', [['', 'Tất cả'], ['image', 'Ảnh'], ['video', 'Video']], apply));
-  if (role === 'admin' || isLeadUser(State.user)) {
-    wrap.appendChild(filterSelect('ua_id', 'Người order', [['', 'Tất cả'], ...meta.uas.map(u => [u.id, u.full_name])], apply));
-    wrap.appendChild(filterSelect('editor_id', 'Người làm', [['', 'Tất cả'], ['none', '— Chưa giao —'], ...meta.editors.map(u => [u.id, u.full_name])], apply));
+  wrap.appendChild(fInput('search', 'Tìm kiếm', 'Mã / mô tả', pending, doSearch));
+  wrap.appendChild(fSelect('app_id', 'App', [['', 'Tất cả'], ...(apps || []).map(a => [a.id, a.code + ' - ' + a.name])], pending));
+  wrap.appendChild(fSelect('status', 'Trạng thái', [['', 'Tất cả'], ...meta.statuses.map(s => [s, s])], pending));
+  wrap.appendChild(fSelect('category', 'Loại', [['', 'Tất cả'], ['image', 'Ảnh'], ['video', 'Video']], pending));
+  if (managerFilters) {
+    wrap.appendChild(fSelect('ua_id', 'Người order', [['', 'Tất cả'], ...meta.uas.map(u => [u.id, u.full_name])], pending));
+    wrap.appendChild(fSelect('editor_id', 'Người làm', [['', 'Tất cả'], ['none', '— Chưa giao —'], ...meta.editors.map(u => [u.id, u.full_name])], pending));
   }
-  wrap.appendChild(filterDate('from', 'Từ ngày', apply));
-  wrap.appendChild(filterDate('to', 'Đến ngày', apply));
+  wrap.appendChild(fDate('from', 'Từ ngày', pending));
+  wrap.appendChild(fDate('to', 'Đến ngày', pending));
+
+  wrap.appendChild(el('div', { class: 'field' }, el('label', { style: 'visibility:hidden' }, '.'),
+    el('button', { class: 'btn primary', onclick: doSearch }, '🔍 Tìm kiếm')));
   if (Object.keys(orderFilters).length)
-    wrap.appendChild(el('button', { class: 'btn sm', onclick: () => { orderFilters = {}; route(); } }, '✕ Xóa lọc'));
+    wrap.appendChild(el('div', { class: 'field' }, el('label', { style: 'visibility:hidden' }, '.'),
+      el('button', { class: 'btn', onclick: () => { orderFilters = {}; route(); } }, '✕ Xóa lọc')));
   return wrap;
 }
 
-function filterInput(key, label, ph, apply, type) {
-  const inp = el('input', { type: type || 'text', placeholder: ph, value: orderFilters[key] || '' });
-  inp.addEventListener('change', () => { if (inp.value) orderFilters[key] = inp.value; else delete orderFilters[key]; apply(); });
-  if ((type || 'text') === 'text') inp.addEventListener('keydown', e => { if (e.key === 'Enter') { if (inp.value) orderFilters[key] = inp.value; else delete orderFilters[key]; apply(); } });
+// Bộ lọc chỉ ghi vào "pending"; chỉ áp dụng khi bấm "Tìm kiếm"
+function fInput(key, label, ph, pending, onEnter) {
+  const inp = el('input', { type: 'text', placeholder: ph, value: pending[key] || '' });
+  inp.addEventListener('input', () => { if (inp.value) pending[key] = inp.value; else delete pending[key]; });
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter' && onEnter) onEnter(); });
   return el('div', { class: 'field' }, el('label', {}, label), inp);
 }
-function filterSelect(key, label, options, apply) {
-  const sel = el('select', {}, options.map(([v, t]) => el('option', { value: v, selected: String(orderFilters[key] || '') === String(v) }, t)));
-  sel.addEventListener('change', () => { if (sel.value) orderFilters[key] = sel.value; else delete orderFilters[key]; apply(); });
+function fSelect(key, label, options, pending) {
+  const sel = el('select', {}, options.map(([v, t]) => el('option', { value: v, selected: String(pending[key] || '') === String(v) }, t)));
+  sel.addEventListener('change', () => { if (sel.value) pending[key] = sel.value; else delete pending[key]; });
   return el('div', { class: 'field' }, el('label', {}, label), sel);
 }
-// Ô chọn ngày bằng lịch (dd/mm/yyyy)
-function filterDate(key, label, apply) {
+function fDate(key, label, pending) {
   const inp = el('input', { type: 'text', placeholder: 'Chọn ngày', readonly: true });
-  setTimeout(() => initDatePicker(inp, orderFilters[key] || null, (dateStr) => {
-    if (dateStr) orderFilters[key] = dateStr; else delete orderFilters[key];
-    apply();
-  }), 0);
+  setTimeout(() => initDatePicker(inp, pending[key] || null, (dateStr) => { if (dateStr) pending[key] = dateStr; else delete pending[key]; }), 0);
   return el('div', { class: 'field' }, el('label', {}, label), inp);
 }
 
