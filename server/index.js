@@ -242,7 +242,12 @@ app.get('/api/orders', authenticate, (req, res) => {
   const params = [];
 
   // Giới hạn theo role
-  if (ORDERER_ROLES.includes(req.user.role)) { where.push('o.ua_id = ?'); params.push(req.user.id); }
+  if (req.query.managed === '1' && (req.user.role === 'ua' || req.user.role === 'po')) {
+    // UA/PO: xem mọi order (kể cả người khác tạo) của app mình được giao phụ trách
+    where.push('o.app_id IN (SELECT app_id FROM app_users WHERE user_id = ?)');
+    params.push(req.user.id);
+  }
+  else if (ORDERER_ROLES.includes(req.user.role)) { where.push('o.ua_id = ?'); params.push(req.user.id); }
   else if (req.user.role === 'editor' && !isLeadUser(req.user)) {
     // Editor thường: chỉ order được giao và đã submit
     where.push('o.editor_id = ? AND o.status != ?'); params.push(req.user.id, 'Đợi submit');
@@ -274,7 +279,14 @@ app.get('/api/orders', authenticate, (req, res) => {
 app.get('/api/orders/:id', authenticate, (req, res) => {
   const o = getOrder(req.params.id);
   if (!o) return res.status(404).json({ error: 'Không tìm thấy order' });
-  if (ORDERER_ROLES.includes(req.user.role) && o.ua_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
+  if (ORDERER_ROLES.includes(req.user.role) && o.ua_id !== req.user.id) {
+    // UA/PO được xem order của người khác nếu là app mình phụ trách
+    let ok = false;
+    if ((req.user.role === 'ua' || req.user.role === 'po') && o.app_id) {
+      ok = !!db.prepare('SELECT 1 FROM app_users WHERE app_id = ? AND user_id = ?').get(o.app_id, req.user.id);
+    }
+    if (!ok) return res.status(403).json({ error: 'Không có quyền' });
+  }
   if (req.user.role === 'editor' && !isLeadUser(req.user) && o.editor_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
   res.json(o);
 });

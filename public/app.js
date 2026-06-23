@@ -266,23 +266,27 @@ const NAV = {
     ['#/reports', '📈', 'Báo cáo'],
     ['#/settings', '⚙️', 'Cài đặt'],
   ],
-  ua: [
-    ['#/dashboard', '📊', 'Tổng quan'],
-    ['#/new', '➕', 'Tạo Order'],
-    ['#/orders', '📋', 'Order của tôi'],
-  ],
   editor: [
     ['#/dashboard', '📊', 'Tổng quan'],
     ['#/orders', '📋', 'Order được giao'],
   ],
 };
-// ASO/PO/HR: giống UA — tạo order + xem order của mình
+// UA/PO: tạo order, xem order của mình, và quản lý order của app được giao
+const UA_PO_NAV = [
+  ['#/dashboard', '📊', 'Tổng quan'],
+  ['#/new', '➕', 'Tạo Order'],
+  ['#/orders', '📋', 'Order của tôi'],
+  ['#/managed', '📂', 'Quản lý Order'],
+];
+NAV.ua = UA_PO_NAV;
+NAV.po = UA_PO_NAV;
+// ASO/HR: tạo order + xem order của mình
 const ORDERER_NAV = [
   ['#/dashboard', '📊', 'Tổng quan'],
   ['#/new', '➕', 'Tạo Order'],
   ['#/orders', '📋', 'Order của tôi'],
 ];
-['aso', 'po', 'hr'].forEach(r => { NAV[r] = ORDERER_NAV; });
+['aso', 'hr'].forEach(r => { NAV[r] = ORDERER_NAV; });
 // Lead: vừa làm order được giao, vừa quản lý/xem order của team + báo cáo
 const LEAD_NAV = [
   ['#/dashboard', '📊', 'Tổng quan'],
@@ -334,6 +338,7 @@ const ROUTES = {
   dashboard: viewDashboard,
   orders: viewOrders,
   assigned: (c) => viewOrders(c, { assignedToMe: true }),
+  managed: (c) => viewOrders(c, { managed: true }),
   new: viewNewOrder,
   apps: viewApps,
   users: viewUsers,
@@ -620,8 +625,10 @@ async function viewOrders(c, opts = {}) {
   const role = State.user.role;
   const lead = isLeadUser(State.user);
   const assignedToMe = !!opts.assignedToMe;            // tab "Order được giao" của Lead
+  const managed = !!opts.managed;                      // tab "Quản lý Order" của UA/PO (order app được giao)
   const canManage = (role === 'admin' || lead) && !assignedToMe;
   const title = assignedToMe ? 'Order được giao'
+    : managed ? 'Quản lý Order'
     : lead ? 'Quản lý Order'
     : role === 'editor' ? 'Order được giao'
     : isOrdererRole(role) ? 'Order của tôi' : 'Quản lý Order';
@@ -629,6 +636,7 @@ async function viewOrders(c, opts = {}) {
 
   const query = { ...orderFilters };
   if (assignedToMe) query.editor_id = State.user.id;
+  if (managed) query.managed = 1;
   const qs = new URLSearchParams(query).toString();
   const [orders, apps] = await Promise.all([
     api('/orders' + (qs ? '?' + qs : '')),
@@ -641,7 +649,8 @@ async function viewOrders(c, opts = {}) {
     el('span', { class: 'muted' }, '· ' + orders.length + ' order'),
     el('span', { class: 'spacer' }),
   );
-  if (isOrdererRole(role)) head.appendChild(el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order'));
+  if (managed) head.appendChild(el('span', { class: 'muted' }, 'Order của các app bạn phụ trách'));
+  if (isOrdererRole(role) && !managed) head.appendChild(el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order'));
   if (role === 'admin') head.appendChild(el('button', { class: 'btn primary', onclick: () => openOrderForm(null) }, '➕ Tạo order'));
   c.appendChild(head);
 
@@ -657,10 +666,11 @@ async function viewOrders(c, opts = {}) {
     ));
   }
 
-  c.appendChild(renderOrderFilters(apps, (role === 'admin' || lead) && !assignedToMe));
+  c.appendChild(renderOrderFilters(apps, ((role === 'admin' || lead) && !assignedToMe) || managed));
 
   if (!orders.length) {
-    c.appendChild(el('div', { class: 'card' }, el('div', { class: 'empty' }, el('div', { class: 'ico' }, '📭'), 'Chưa có order nào')));
+    c.appendChild(el('div', { class: 'card' }, el('div', { class: 'empty' }, el('div', { class: 'ico' }, '📭'),
+      managed ? 'Chưa có order nào cho app bạn phụ trách' : 'Chưa có order nào')));
     return;
   }
 
