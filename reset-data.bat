@@ -10,6 +10,7 @@ echo.
 echo   - SE XOA: nhan vien mau, app mau, order mau.
 echo   - GIU LAI: tai khoan admin + cau hinh (loai order/diem, size, doi tac).
 echo.
+echo   *** HAY DONG cua so server (run-server.bat) TRUOC khi chay file nay ***
 echo   Truoc khi xoa se TU DONG BACKUP vao thu muc backups\
 echo.
 set /p OK=Go chu "XOA" (in hoa) roi Enter de tiep tuc:
