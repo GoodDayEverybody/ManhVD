@@ -7,7 +7,8 @@
     "start": "node --watch server/index.js",
     "start:once": "node server/index.js",
     "seed": "node server/seed.js",
-    "setup": "node server/seed.js"
+    "setup": "node server/seed.js",
+    "backup": "node server/backup.js"
   },
   "license": "MIT",
   "engines": {
