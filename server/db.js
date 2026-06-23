@@ -109,6 +109,7 @@ function init() {
       status        TEXT NOT NULL DEFAULT 'Chờ làm', -- Chờ làm | Đang làm | Hoàn thành | Yêu cầu sửa | Hủy
       drive_link    TEXT,                          -- Link Drive output
       youtube_link  TEXT,
+      need_youtube  INTEGER NOT NULL DEFAULT 0,     -- order video có cần upload Youtube?
       completed_at  TEXT,                          -- Thời gian hoàn thành
       note          TEXT,                          -- Note (từ editor)
       points        REAL NOT NULL DEFAULT 0,
@@ -133,6 +134,9 @@ function init() {
   const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col);
   if (!hasColumn('order_types', 'note')) db.exec('ALTER TABLE order_types ADD COLUMN note TEXT');
   if (!hasColumn('apps', 'figma_link')) db.exec('ALTER TABLE apps ADD COLUMN figma_link TEXT');
+  if (!hasColumn('orders', 'need_youtube')) db.exec('ALTER TABLE orders ADD COLUMN need_youtube INTEGER NOT NULL DEFAULT 0');
+  // Chuẩn hóa trạng thái cũ -> mới
+  db.exec("UPDATE orders SET status='Hoàn thành' WHERE status='Đã xong'");
 
   // Migration: gỡ ràng buộc CHECK cũ trên users.role (để cho phép aso/po/hr)
   const urow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();

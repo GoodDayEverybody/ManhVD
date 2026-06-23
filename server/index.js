@@ -216,14 +216,15 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'h
   const editorId = (req.user.role === 'admin' && b.editor_id) ? b.editor_id : null;
   const code = nextOrderCode(label);
 
+  const needYoutube = (category === 'video' && b.need_youtube) ? 1 : 0;
   const r = db.prepare(`INSERT INTO orders
     (order_code, category, app_id, app_name, partner, link_figma, order_date, objective,
-     order_type_id, ua_id, description, ref_link, size, note_request, editor_id, status, points)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+     order_type_id, ua_id, description, ref_link, size, note_request, editor_id, status, points, need_youtube)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     code, category, b.app_id || null, appName, partner, b.link_figma || '',
     b.order_date || todayStr(), b.objective || '', type.id, uaId,
     b.description || '', b.ref_link || '', b.size || '', b.note_request || '',
-    editorId, 'Đợi submit', 0);
+    editorId, 'Đợi submit', 0, needYoutube);
 
   res.json(getOrder(r.lastInsertRowid));
 });
@@ -245,13 +246,13 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
   if (role === 'admin') {
     // Admin sửa được tất cả
     const fields = ['app_id', 'app_name', 'partner', 'link_figma', 'order_date', 'objective',
-      'order_type_id', 'ua_id', 'description', 'ref_link', 'size', 'note_request',
+      'order_type_id', 'ua_id', 'description', 'ref_link', 'size', 'note_request', 'need_youtube',
       'editor_id', 'status', 'drive_link', 'youtube_link', 'note'];
     for (const f of fields) if (f in b) upd[f] = b[f];
   } else if (isOrderer) {
     // Người order sửa thông tin yêu cầu của order mình tạo
     const fields = ['app_id', 'app_name', 'partner', 'link_figma', 'order_date', 'objective',
-      'order_type_id', 'description', 'ref_link', 'size', 'note_request'];
+      'order_type_id', 'description', 'ref_link', 'size', 'note_request', 'need_youtube'];
     for (const f of fields) if (f in b) upd[f] = b[f];
     if (b.status === 'Yêu cầu sửa') upd.status = 'Yêu cầu sửa';
     if (b.status === 'Hủy') upd.status = 'Hủy';

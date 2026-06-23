@@ -67,7 +67,7 @@ function fmtNum(n) { return (Math.round((n || 0) * 100) / 100).toLocaleString('v
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 function statusBadge(s) {
-  const map = { 'Đợi submit': 'amber', 'Chờ làm': 'gray', 'Đang làm': 'blue', 'Hoàn thành': 'green', 'Yêu cầu sửa': 'red', 'Hủy': 'darkred' };
+  const map = { 'Đợi submit': 'amber', 'Chờ làm': 'gray', 'Đang làm': 'blue', 'Hoàn thành': 'green', 'Đã xong': 'green', 'Yêu cầu sửa': 'red', 'Hủy': 'darkred' };
   return el('span', { class: 'badge ' + (map[s] || 'gray') }, s);
 }
 function appStatusBadge(s) {
@@ -546,6 +546,7 @@ async function openOrderDetail(id) {
   add('Editor', o.editor_name || 'Chưa giao');
   add('Ngày order', fmtDate(o.order_date));
   add('Kích thước', o.size);
+  if (o.category === 'video') add('Upload Youtube', o.need_youtube ? 'Có' : 'Không');
   add('Trạng thái', statusBadge(o.status));
   add('Điểm', fmtNum(o.points));
   if (o.completed_at) add('Hoàn thành', fmtDate(o.completed_at));
@@ -596,7 +597,7 @@ function openEditorUpdate(o) {
   const body = el('div', {},
     el('div', { class: 'field' }, el('label', {}, 'Trạng thái'), statusSel),
     el('div', { class: 'field' }, el('label', {}, 'Link Drive (output)'), drive),
-    o.category === 'video' ? el('div', { class: 'field' }, el('label', {}, 'Link Youtube'), yt) : null,
+    o.need_youtube ? el('div', { class: 'field' }, el('label', {}, 'Link Youtube (output)'), yt) : null,
     el('div', { class: 'field' }, el('label', {}, 'Note'), note),
   );
   const save = async () => {
@@ -780,7 +781,14 @@ async function buildOrderForm(container, order, inline, closeM) {
     return vals.join(', ');
   };
 
-  cat.addEventListener('change', () => { fillTypes(); buildSizeSection(); });
+  // Upload Youtube: chỉ áp dụng cho order Video
+  const needYoutube = el('input', { type: 'checkbox', checked: order && order.need_youtube ? true : false });
+  const ytField = el('div', { class: 'field' }, el('label', { class: 'size-check' }, needYoutube, el('span', {}, 'Cần upload Youtube')),
+    el('div', { class: 'hint' }, 'Nếu chọn, khi Editor trả kết quả sẽ có thêm ô "Link Youtube (output)".'));
+  const toggleYt = () => { ytField.style.display = cat.value === 'video' ? '' : 'none'; };
+  toggleYt();
+
+  cat.addEventListener('change', () => { fillTypes(); buildSizeSection(); toggleYt(); });
 
   // Admin: giao editor & trạng thái (Người order tự gán theo người tạo)
   const editorSel = el('select', {}, el('option', { value: '' }, '— Chưa giao —'),
@@ -797,6 +805,7 @@ async function buildOrderForm(container, order, inline, closeM) {
     el('div', { class: 'field' }, el('label', {}, 'Order date'), orderDateDisplay),
     el('div', { class: 'field' }, el('label', {}, 'Mô tả chi tiết'), desc),
     el('div', { class: 'field' }, el('label', {}, 'Kích thước'), sizeBox),
+    ytField,
     el('div', { class: 'field' }, el('label', {}, 'Ref link'), ref),
     el('div', { class: 'field' }, el('label', {}, 'Lưu ý'), noteReq),
     isAdmin ? el('div', { class: 'field' }, el('label', {}, 'Giao cho Editor'), editorSel) : null,
@@ -815,6 +824,7 @@ async function buildOrderForm(container, order, inline, closeM) {
       app_name: (appList.find(a => a.id === Number(appId)) || {}).name || '',
       order_date: orderDateDefault, description: desc.value,
       ref_link: ref.value, size: collectSizes(), note_request: noteReq.value,
+      need_youtube: (cat.value === 'video' && needYoutube.checked) ? 1 : 0,
     };
     if (isAdmin) { body.editor_id = editorSel.value ? Number(editorSel.value) : null; if (order) body.status = statusSel.value; }
     try {
