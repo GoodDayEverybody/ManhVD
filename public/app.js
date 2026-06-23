@@ -1477,9 +1477,9 @@ async function viewReports(c) {
 
   const head = el('div', { class: 'page-head' }, el('h1', {}, 'Báo cáo hiệu suất'),
     el('span', { class: 'spacer' }),
-    el('span', { class: 'muted', style: 'margin-right:10px' }, rangeText),
     rangeSel);
   c.appendChild(head);
+  c.appendChild(el('div', { class: 'muted', style: 'margin:-6px 0 14px; font-weight:600' }, rangeText));
 
   if (reportRange === 'custom') {
     const fromInp = el('input', { type: 'text', placeholder: 'Từ ngày', readonly: true, style: 'min-width:150px' });
