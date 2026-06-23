@@ -870,18 +870,46 @@ async function openOrderForm(order) {
 }
 
 // Dropdown có ô tìm kiếm. items: [{value, label}]. Trả { node, getValue }
-// Chọn nhiều người từ danh sách (checkbox). users: [{id, full_name}]
+// Dropdown chọn nhiều người (xổ xuống, có ô tìm + tick chọn). users: [{id, full_name}]
 function multiCheck(users, selectedIds) {
   const sel = new Set((selectedIds || []).map(Number));
-  const inputs = [];
-  const wrap = el('div', { class: 'multi-check' });
-  if (!users.length) wrap.appendChild(el('span', { class: 'hint' }, 'Chưa có người dùng phù hợp'));
-  users.forEach(u => {
-    const cb = el('input', { type: 'checkbox', value: u.id, checked: sel.has(Number(u.id)) });
-    inputs.push(cb);
-    wrap.appendChild(el('label', { class: 'size-check' }, cb, el('span', {}, u.full_name)));
-  });
-  return { node: wrap, getValues: () => inputs.filter(i => i.checked).map(i => Number(i.value)) };
+  const wrap = el('div', { class: 'combo' });
+  const display = el('button', { type: 'button', class: 'combo-display' });
+  const panel = el('div', { class: 'combo-panel', style: 'display:none' });
+  const search = el('input', { class: 'combo-search', placeholder: '🔍 Tìm tên...' });
+  const list = el('div', { class: 'combo-list' });
+  panel.appendChild(search); panel.appendChild(list);
+  wrap.appendChild(display); wrap.appendChild(panel);
+
+  const renderDisplay = () => {
+    const names = users.filter(u => sel.has(Number(u.id))).map(u => u.full_name);
+    display.textContent = names.length ? names.join(', ') : '— Chọn người —';
+    display.classList.toggle('placeholder', !names.length);
+  };
+  const renderList = (filter) => {
+    list.innerHTML = '';
+    const f = (filter || '').trim().toLowerCase();
+    const matched = users.filter(u => u.full_name.toLowerCase().includes(f));
+    if (!matched.length) { list.appendChild(el('div', { class: 'combo-empty' }, users.length ? 'Không tìm thấy' : 'Chưa có người dùng phù hợp')); return; }
+    matched.forEach(u => {
+      const cb = el('input', { type: 'checkbox', checked: sel.has(Number(u.id)) });
+      const opt = el('label', { class: 'combo-opt' + (sel.has(Number(u.id)) ? ' sel' : '') }, cb, el('span', {}, u.full_name));
+      cb.addEventListener('change', () => {
+        if (cb.checked) sel.add(Number(u.id)); else sel.delete(Number(u.id));
+        opt.classList.toggle('sel', cb.checked);
+        renderDisplay();
+      });
+      list.appendChild(opt);
+    });
+  };
+  const onOutside = (e) => { if (!wrap.contains(e.target)) close(); };
+  const open = () => { panel.style.display = ''; search.value = ''; renderList(''); setTimeout(() => search.focus(), 0); document.addEventListener('mousedown', onOutside, true); };
+  const close = () => { panel.style.display = 'none'; document.removeEventListener('mousedown', onOutside, true); };
+  display.addEventListener('click', (e) => { e.preventDefault(); panel.style.display === 'none' ? open() : close(); });
+  search.addEventListener('input', () => renderList(search.value));
+  search.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  renderDisplay();
+  return { node: wrap, getValues: () => [...sel] };
 }
 
 function makeCombo(items, selectedValue, placeholder, onChange) {

@@ -148,7 +148,6 @@ textarea { resize: vertical; min-height: 70px; }
 .size-grid { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
 .size-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; font-size: 13px; }
 .size-check input[type=checkbox] { width: auto; margin: 0; }
-.multi-check { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: #fff; max-height: 150px; overflow-y: auto; }
 .size-group-title { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--primary); font-weight: 700; margin: 12px 0 6px; }
 .size-group-head { display: flex; align-items: center; gap: 14px; margin: 12px 0 6px; }
 .size-group-head .size-group-title { margin: 0; }
@@ -168,13 +167,14 @@ textarea { resize: vertical; min-height: 70px; }
 
 /* combobox có tìm kiếm */
 .combo { position: relative; }
-.combo-display { width: 100%; text-align: left; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: #fff; font-size: 14px; font-family: inherit; cursor: pointer; color: var(--text); }
+.combo-display { width: 100%; text-align: left; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: #fff; font-size: 14px; font-family: inherit; cursor: pointer; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .combo-display:hover { border-color: #c7cdd9; }
 .combo-display.placeholder { color: #9ca3af; }
 .combo-panel { position: absolute; z-index: 130; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 8px; }
 .combo-search { margin-bottom: 6px; }
 .combo-list { max-height: 220px; overflow-y: auto; }
-.combo-opt { padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.combo-opt { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; }
+.combo-opt input[type=checkbox] { width: auto; margin: 0; }
 .combo-opt:hover { background: var(--primary-light); }
 .combo-opt.sel { background: var(--primary); color: #fff; }
 .combo-empty { padding: 10px; color: var(--muted); font-size: 13px; text-align: center; }
