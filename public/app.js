@@ -624,7 +624,7 @@ async function openOrderDetail(id) {
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openSubmitDialog(o); } }, '✅ Giao việc & Submit'));
   }
   if (role === 'editor' && o.editor_id === State.user.id && o.status !== 'Đợi submit') footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openEditorUpdate(o); } }, '✏️ Cập nhật tiến độ'));
-  if (role === 'admin' || isLead) {
+  if (role === 'admin') {
     if (canCancel) footer.push(el('button', { class: 'btn danger', onclick: cancelOrder }, '🚫 Hủy order'));
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openOrderForm(o); } }, '✏️ Sửa'));
   }
@@ -739,7 +739,7 @@ function makeCombo(items, selectedValue, placeholder, onChange) {
 async function buildOrderForm(container, order, inline, closeM) {
   const meta = State.meta;
   const role = State.user.role;
-  const isAdmin = role === 'admin' || isLeadUser(State.user);
+  const isAdmin = role === 'admin';
   const apps = await api('/apps?active=1');
   const allApps = isAdmin && order ? await api('/apps') : apps;
   const appList = (order ? allApps : apps);
@@ -845,12 +845,25 @@ async function buildOrderForm(container, order, inline, closeM) {
   const toggleYt = () => { ytField.style.display = cat.value === 'video' ? '' : 'none'; };
   toggleYt();
 
-  cat.addEventListener('change', () => { fillTypes(); buildSizeSection(); toggleYt(); });
+  // Giao cho người làm (bắt buộc). Lọc theo loại: Video -> video editor/lead; Ảnh -> graphic/uiux
+  const editorSel = el('select', {});
+  const fillAssign = () => {
+    const cur = order ? order.editor_id : null;
+    const list = meta.editors.filter(e => cat.value === 'video'
+      ? (e.editor_type === 'video' || e.editor_type === 'video_lead')
+      : (e.editor_type === 'graphic' || e.editor_type === 'uiux'));
+    editorSel.innerHTML = '';
+    editorSel.appendChild(el('option', { value: '' }, '— Chọn người làm —'));
+    list.forEach(u => editorSel.appendChild(el('option', { value: u.id, selected: u.id === cur }, u.full_name + ' (' + editorTypeLabel(u.editor_type) + ')')));
+  };
+  fillAssign();
+  const assignHint = el('div', { class: 'hint' }, '');
+  const updateAssignHint = () => { assignHint.textContent = cat.value === 'video' ? 'Order video sẽ chờ Lead duyệt & submit rồi mới chuyển cho người làm.' : 'Order ảnh sẽ được giao ngay cho người làm.'; };
+  updateAssignHint();
 
-  // Admin: giao editor & trạng thái (Người order tự gán theo người tạo)
-  const editorSel = el('select', {}, el('option', { value: '' }, '— Chưa giao —'),
-    meta.editors.map(u => el('option', { value: u.id, selected: order && order.editor_id === u.id }, u.full_name + ' (' + editorTypeLabel(u.editor_type) + ')')));
   const statusSel = el('select', {}, meta.statuses.map(s => el('option', { value: s, selected: order && order.status === s }, s)));
+
+  cat.addEventListener('change', () => { fillTypes(); buildSizeSection(); toggleYt(); fillAssign(); updateAssignHint(); });
 
   container.innerHTML = '';
   container.appendChild(el('div', {},
@@ -865,7 +878,7 @@ async function buildOrderForm(container, order, inline, closeM) {
     ytField,
     el('div', { class: 'field' }, el('label', {}, 'Ref link'), ref),
     el('div', { class: 'field' }, el('label', {}, 'Lưu ý'), noteReq),
-    isAdmin ? el('div', { class: 'field' }, el('label', {}, 'Giao cho Editor'), editorSel) : null,
+    el('div', { class: 'field' }, el('label', {}, 'Giao cho (người làm) ', el('span', { class: 'req' }, '*')), editorSel, assignHint),
     isAdmin && order ? el('div', { class: 'field' }, el('label', {}, 'Trạng thái'), statusSel) : null,
   ));
 
@@ -875,6 +888,7 @@ async function buildOrderForm(container, order, inline, closeM) {
     const appId = appCombo.getValue();
     if (!appId) return toast('Vui lòng chọn App', 'err');
     if (!typeSel.value) return toast('Vui lòng chọn loại order', 'err');
+    if (!editorSel.value) return toast('Vui lòng chọn người làm', 'err');
     const body = {
       category: cat.value, order_type_id: Number(typeSel.value),
       app_id: Number(appId),
@@ -882,8 +896,9 @@ async function buildOrderForm(container, order, inline, closeM) {
       order_date: orderDateDefault, description: desc.value,
       ref_link: ref.value, size: collectSizes(), note_request: noteReq.value,
       need_youtube: (cat.value === 'video' && needYoutube.checked) ? 1 : 0,
+      editor_id: Number(editorSel.value),
     };
-    if (isAdmin) { body.editor_id = editorSel.value ? Number(editorSel.value) : null; if (order) body.status = statusSel.value; }
+    if (isAdmin && order) body.status = statusSel.value;
     try {
       if (order) { await api('/orders/' + order.id, { method: 'PUT', body }); toast('Đã lưu thay đổi'); }
       else { const r = await api('/orders', { method: 'POST', body }); toast('Đã tạo order ' + r.order_code); }

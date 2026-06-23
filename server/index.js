@@ -211,7 +211,10 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'h
     if (ap) { appName = appName || ap.name; partner = partner || ap.partner; }
   }
 
-  const editorId = (req.user.role === 'admin' && b.editor_id) ? b.editor_id : null;
+  const editorId = b.editor_id ? Number(b.editor_id) : null;
+  if (!editorId) return res.status(400).json({ error: 'Vui lòng chọn người làm khi tạo order' });
+  // Ảnh: giao luôn (Chờ làm). Video: cần Lead submit (Đợi submit)
+  const initStatus = category === 'video' ? 'Đợi submit' : 'Chờ làm';
   const code = nextOrderCode(label);
 
   const needYoutube = (category === 'video' && b.need_youtube) ? 1 : 0;
@@ -222,7 +225,7 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'h
     code, category, b.app_id || null, appName, partner, b.link_figma || '',
     b.order_date || todayStr(), b.objective || '', type.id, uaId,
     b.description || '', b.ref_link || '', b.size || '', b.note_request || '',
-    editorId, 'Đợi submit', 0, needYoutube);
+    editorId, initStatus, 0, needYoutube);
 
   res.json(getOrder(r.lastInsertRowid));
 });
@@ -241,8 +244,8 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
 
   const upd = {};
 
-  if (role === 'admin' || isLead) {
-    // Admin & Lead: quản lý order như nhau (sửa, giao việc, submit...)
+  if (role === 'admin') {
+    // Admin sửa được tất cả
     const fields = ['app_id', 'app_name', 'partner', 'link_figma', 'order_date', 'objective',
       'order_type_id', 'ua_id', 'description', 'ref_link', 'size', 'note_request', 'need_youtube',
       'editor_id', 'status', 'drive_link', 'youtube_link', 'note'];
@@ -250,10 +253,14 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
   } else if (isOrderer) {
     // Người order sửa thông tin yêu cầu của order mình tạo
     const fields = ['app_id', 'app_name', 'partner', 'link_figma', 'order_date', 'objective',
-      'order_type_id', 'description', 'ref_link', 'size', 'note_request', 'need_youtube'];
+      'order_type_id', 'description', 'ref_link', 'size', 'note_request', 'need_youtube', 'editor_id'];
     for (const f of fields) if (f in b) upd[f] = b[f];
     if (b.status === 'Yêu cầu sửa') upd.status = 'Yêu cầu sửa';
     if (b.status === 'Hủy') upd.status = 'Hủy';
+  } else if (isLead) {
+    // Lead: chỉ được assign người làm + submit (không sửa nội dung order)
+    const fields = ['editor_id', 'status', 'drive_link', 'youtube_link', 'note'];
+    for (const f of fields) if (f in b) upd[f] = b[f];
   } else if (role === 'editor') {
     // Editor cập nhật tiến độ & output
     const fields = ['status', 'drive_link', 'youtube_link', 'note'];

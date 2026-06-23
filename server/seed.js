@@ -222,13 +222,14 @@ const seedOrders = (count) => tx(() => {
     const type = isVideo ? pick(videoTypeIds) : pick(imageTypeIds);
     const app = pick(appRows);
     const uaId = pick(uaIdList);
-    const status = pick(STATUSES);
+    // Ảnh không có "Đợi submit"; Video có thể đang Đợi submit
+    const status = isVideo
+      ? pick(['Đợi submit', 'Đợi submit', 'Chờ làm', 'Đang làm', 'Hoàn thành', 'Hoàn thành', 'Yêu cầu sửa'])
+      : pick(['Chờ làm', 'Đang làm', 'Hoàn thành', 'Hoàn thành', 'Yêu cầu sửa', 'Hủy']);
     const orderDate = daysAgo(Math.floor(Math.random() * 45));
     const done = status === 'Hoàn thành';
-    const assigned = Math.random() < 0.85;
-    const editorId = assigned
-      ? (isVideo ? pick(videoEditorIds) : pick(designerIds))
-      : null;
+    // Assign là bắt buộc -> luôn có người làm
+    const editorId = isVideo ? pick(videoEditorIds) : pick(designerIds);
 
     insOrder.run({
       order_code: nextOrderCode(label),
@@ -247,7 +248,7 @@ const seedOrders = (count) => tx(() => {
       size: isVideo ? pick(SIZES_VIDEO) : pick(SIZES_IMAGE),
       note_request: Math.random() < 0.4 ? 'Ưu tiên gấp, cần trong tuần này' : '',
       editor_id: editorId,
-      status: editorId ? status : 'Đợi submit',
+      status: status,
       drive_link: done ? 'https://drive.google.com/output/' + app.code : '',
       youtube_link: (done && isVideo) ? 'https://youtu.be/' + Math.random().toString(36).slice(2, 9) : '',
       completed_at: done ? daysAgo(Math.floor(Math.random() * 5)) : null,
