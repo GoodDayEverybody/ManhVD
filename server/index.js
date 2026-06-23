@@ -304,6 +304,9 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'h
   const type = db.prepare('SELECT * FROM order_types WHERE id = ?').get(b.order_type_id);
   if (!type) return res.status(400).json({ error: 'Loại order không hợp lệ' });
 
+  // Mọi order (trừ admin) phải gắn với một App cụ thể -> để áp quy tắc app/quyền
+  if (req.user.role !== 'admin' && !b.app_id) return res.status(400).json({ error: 'Vui lòng chọn App' });
+
   const category = type.category;
   const label = category === 'video' ? 'V' : 'A';
   const uaId = req.user.role === 'admin' && b.ua_id ? b.ua_id : req.user.id;
