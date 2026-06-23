@@ -70,6 +70,13 @@ function statusBadge(s) {
   const map = { 'Đợi submit': 'amber', 'Chờ làm': 'gray', 'Đang làm': 'blue', 'Hoàn thành': 'green', 'Đã xong': 'green', 'Yêu cầu sửa': 'red', 'Hủy': 'darkred' };
   return el('span', { class: 'badge ' + (map[s] || 'gray') }, s);
 }
+// Màu biểu đồ khớp với màu badge trạng thái
+const STATUS_COLORS = {
+  'Đợi submit': '#f59e0b', 'Chờ làm': '#94a3b8', 'Đang làm': '#2563eb',
+  'Hoàn thành': '#16a34a', 'Đã xong': '#16a34a', 'Yêu cầu sửa': '#dc2626', 'Hủy': '#991b1b',
+};
+function statusColors(labels) { return labels.map(l => STATUS_COLORS[l] || '#9ca3af');
+}
 function appStatusBadge(s) {
   const map = { 'Đang chạy': 'green', 'Đợi bàn giao': 'amber', 'Tạm dừng': 'gray', 'Dừng': 'red' };
   return el('span', { class: 'badge ' + (map[s] || 'gray') }, s);
@@ -378,7 +385,9 @@ async function dashboardLead(c) {
   c.innerHTML = '';
   c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name), el('span', { class: 'muted' }, '· Team Creatives')));
   const cnt = (s) => orders.filter(o => o.status === s).length;
+  const myPoints = orders.filter(o => o.editor_id === State.user.id).reduce((s, o) => s + (o.points || 0), 0);
   c.appendChild(el('div', { class: 'stat-grid' },
+    statCard('Điểm của tôi', fmtNum(myPoints), '⭐'),
     statCard('Đợi submit', cnt('Đợi submit'), '📤'),
     statCard('Đang làm', cnt('Đang làm'), '🔨'),
     statCard('Chờ làm', cnt('Chờ làm'), '⏳'),
@@ -398,7 +407,7 @@ async function dashboardLead(c) {
   orders.forEach(o => { byStatus[o.status] = (byStatus[o.status] || 0) + 1; });
   setTimeout(() => {
     drawBar('l-load', Object.keys(load), Object.values(load), 'Đang phụ trách', '#d97706');
-    drawPie('l-status', Object.keys(byStatus), Object.values(byStatus));
+    drawPie('l-status', Object.keys(byStatus), Object.values(byStatus), statusColors(Object.keys(byStatus)));
   }, 0);
 }
 
@@ -438,7 +447,7 @@ async function dashboardAdmin(c) {
   ));
 
   setTimeout(() => {
-    drawPie('ch-status', summary.byStatus.map(s => s.status), summary.byStatus.map(s => s.c));
+    drawPie('ch-status', summary.byStatus.map(s => s.status), summary.byStatus.map(s => s.c), statusColors(summary.byStatus.map(s => s.status)));
     drawPie('ch-cat', summary.byCategory.map(s => s.category === 'video' ? 'Video' : 'Ảnh'), summary.byCategory.map(s => s.c));
     drawBar('ch-ua', uaRep.perUser.slice(0, 8).map(u => u.full_name), uaRep.perUser.slice(0, 8).map(u => u.total_orders), 'Số order');
     drawBar('ch-ed', edRep.perUser.slice(0, 8).map(u => u.full_name), edRep.perUser.slice(0, 8).map(u => u.total_points || 0), 'Điểm', '#16a34a');
@@ -472,7 +481,7 @@ async function dashboardOrderer(c) {
     const k = o.order_type_name || '—'; byType[k] = (byType[k] || 0) + 1;
   });
   setTimeout(() => {
-    drawPie('ch-st', Object.keys(byStatus), Object.values(byStatus));
+    drawPie('ch-st', Object.keys(byStatus), Object.values(byStatus), statusColors(Object.keys(byStatus)));
     drawBar('ch-type', Object.keys(byType).slice(0, 10), Object.values(byType).slice(0, 10), 'Số order');
   }, 0);
 }
@@ -504,7 +513,7 @@ async function dashboardEditor(c) {
   c.appendChild(g);
   setTimeout(() => {
     drawLine('ch-tl', rep.timeline.map(t => fmtDate(t.day)), rep.timeline.map(t => t.cnt));
-    drawPie('ch-st', rep.byStatus.map(s => s.status), rep.byStatus.map(s => s.cnt));
+    drawPie('ch-st', rep.byStatus.map(s => s.status), rep.byStatus.map(s => s.cnt), statusColors(rep.byStatus.map(s => s.status)));
   }, 0);
 }
 
@@ -526,15 +535,16 @@ function drawLine(id, labels, data) {
   const x = ctx(id); if (!x) return;
   charts.push(new Chart(x, { type: 'line', data: { labels, datasets: [{ label: 'Số order', data, borderColor: '#4f46e5', backgroundColor: 'rgba(79,70,229,.12)', fill: true, tension: .3, pointRadius: 3 }] }, options: barOpts() }));
 }
-function drawPie(id, labels, data) {
+function drawPie(id, labels, data, colors) {
   const x = ctx(id); if (!x) return;
-  charts.push(new Chart(x, { type: 'doughnut', data: { labels, datasets: [{ data, backgroundColor: PALETTE }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } } }));
+  charts.push(new Chart(x, { type: 'doughnut', data: { labels, datasets: [{ data, backgroundColor: colors || PALETTE }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } } }));
 }
 function barOpts() { return { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }; }
 
 /* ============================ Orders list ============================ */
 
 let orderFilters = {};
+let orderSort = { key: 'order_date', dir: -1 };  // mặc định: mới nhất trước
 
 async function viewOrders(c, opts = {}) {
   const role = State.user.role;
@@ -586,26 +596,38 @@ async function viewOrders(c, opts = {}) {
 
   const showUA = role !== 'ua';
 
-  const table = el('table', {},
-    el('thead', {}, el('tr', {},
-      el('th', {}, 'Loại'), el('th', {}, 'Mã'), el('th', {}, 'App'),
-      showUA ? el('th', {}, 'Người order') : null, el('th', {}, 'Người làm'), el('th', {}, 'Trạng thái'), el('th', {}, 'Ngày order'), el('th', {}, 'Ngày hoàn thành'),
-    )),
-    el('tbody', {}, orders.map(o => {
-      const tr = el('tr', { style: 'cursor:pointer', onclick: () => openOrderDetail(o.id) },
-        el('td', {}, catPill(o.category)),
-        el('td', {}, el('span', { class: 'code-cell' }, o.order_code)),
-        el('td', {}, appLabel(o)),
-        showUA ? el('td', {}, o.ua_name || '—') : null,
-        el('td', {}, o.editor_name ? el('span', {}, o.editor_name) : el('span', { class: 'badge amber' }, 'Chưa giao')),
-        el('td', {}, statusBadge(o.status)),
-        el('td', { class: 'nowrap' }, fmtDate(o.order_date)),
-        el('td', { class: 'nowrap' }, o.completed_at ? fmtDate(o.completed_at) : '—'),
-      );
-      return tr;
-    })),
-  );
-  c.appendChild(el('div', { class: 'table-wrap' }, table));
+  // Cột có thể bấm vào tiêu đề để sắp xếp (sort)
+  const cols = [
+    { key: 'category', label: 'Loại', cls: '', val: o => o.category, cell: o => catPill(o.category) },
+    { key: 'order_code', label: 'Mã', cls: '', val: o => o.order_code, cell: o => el('span', { class: 'code-cell' }, o.order_code) },
+    { key: 'app_name', label: 'App', cls: '', val: o => (o.app_code || '') + (o.app_name || ''), cell: o => appLabel(o) },
+    showUA ? { key: 'ua_name', label: 'Người order', cls: '', val: o => o.ua_name || '', cell: o => o.ua_name || '—' } : null,
+    { key: 'editor_name', label: 'Người làm', cls: '', val: o => o.editor_name || '', cell: o => o.editor_name ? el('span', {}, o.editor_name) : el('span', { class: 'badge amber' }, 'Chưa giao') },
+    { key: 'status', label: 'Trạng thái', cls: '', val: o => o.status, cell: o => statusBadge(o.status) },
+    { key: 'order_date', label: 'Ngày order', cls: 'nowrap', val: o => o.order_date || '', cell: o => fmtDate(o.order_date) },
+    { key: 'completed_at', label: 'Ngày hoàn thành', cls: 'nowrap', val: o => o.completed_at || '', cell: o => o.completed_at ? fmtDate(o.completed_at) : '—' },
+  ].filter(Boolean);
+
+  const wrapNode = el('div', { class: 'table-wrap' });
+  const build = () => {
+    const col = cols.find(c => c.key === orderSort.key) || cols[0];
+    orders.sort((a, b) => {
+      const va = col.val(a), vb = col.val(b);
+      if (va < vb) return -orderSort.dir;
+      if (va > vb) return orderSort.dir;
+      return 0;
+    });
+    const thead = el('thead', {}, el('tr', {}, cols.map(c => {
+      const arrow = orderSort.key === c.key ? (orderSort.dir === 1 ? ' ▲' : ' ▼') : '';
+      return el('th', { class: 'sortable', onclick: () => { if (orderSort.key === c.key) orderSort.dir *= -1; else { orderSort.key = c.key; orderSort.dir = 1; } build(); } }, c.label + arrow);
+    })));
+    const tbody = el('tbody', {}, orders.map(o => el('tr', { style: 'cursor:pointer', onclick: () => openOrderDetail(o.id) },
+      cols.map(c => el('td', c.cls ? { class: c.cls } : {}, c.cell(o))))));
+    wrapNode.innerHTML = '';
+    wrapNode.appendChild(el('table', {}, thead, tbody));
+  };
+  build();
+  c.appendChild(wrapNode);
 }
 
 function renderOrderFilters(apps, managerFilters) {
@@ -1521,7 +1543,7 @@ async function reportEditor(box) {
 
   setTimeout(() => {
     drawBar('r-ed-pts', rep.perUser.map(u => u.full_name), rep.perUser.map(u => u.total_points || 0), 'Điểm', '#16a34a');
-    drawPie('r-ed-st', rep.byStatus.map(s => s.status), rep.byStatus.map(s => s.cnt));
+    drawPie('r-ed-st', rep.byStatus.map(s => s.status), rep.byStatus.map(s => s.cnt), statusColors(rep.byStatus.map(s => s.status)));
     drawLine('r-ed-tl', rep.timeline.map(t => fmtDate(t.day)), rep.timeline.map(t => t.cnt));
   }, 0);
 }

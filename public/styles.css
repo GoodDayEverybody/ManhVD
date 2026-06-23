@@ -109,6 +109,8 @@ thead th {
   font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .03em;
   border-bottom: 1px solid var(--border); white-space: nowrap;
 }
+thead th.sortable { cursor: pointer; user-select: none; }
+thead th.sortable:hover { color: var(--primary); background: #f1f5f9; }
 tbody td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: #fafbff; }
