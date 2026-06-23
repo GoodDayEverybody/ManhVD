@@ -676,7 +676,7 @@ async function viewOrders(c, opts = {}) {
     return;
   }
 
-  const showUA = role !== 'ua';
+  const showUA = role !== 'ua' || managed;  // tab Quản lý Order của UA: hiện cột Người order
 
   // Cột có thể bấm vào tiêu đề để sắp xếp (sort)
   const cols = [
