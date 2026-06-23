@@ -220,11 +220,18 @@ const ORDERER_NAV = [
   ['#/orders', '📋', 'Order của tôi'],
 ];
 ['aso', 'po', 'hr'].forEach(r => { NAV[r] = ORDERER_NAV; });
+// Lead: quản lý order như Admin + báo cáo team
+const LEAD_NAV = [
+  ['#/dashboard', '📊', 'Tổng quan'],
+  ['#/orders', '📋', 'Quản lý Order'],
+  ['#/reports', '📈', 'Báo cáo'],
+];
+function navFor(u) { return isLeadUser(u) ? LEAD_NAV : (NAV[u.role] || []); }
 
 function renderShell() {
   const app = document.getElementById('app');
   const u = State.user;
-  const nav = NAV[u.role] || [];
+  const nav = navFor(u);
 
   const sidebar = el('aside', { class: 'sidebar', id: 'sidebar' },
     el('div', { class: 'brand' }, '🎨 Creatives'),
@@ -278,7 +285,7 @@ function route() {
   document.getElementById('backdrop')?.classList.remove('show');
   const hash = location.hash.replace('#/', '') || 'dashboard';
   const key = hash.split('/')[0];
-  const allowed = (NAV[State.user.role] || []).map(n => n[0].replace('#/', ''));
+  const allowed = navFor(State.user).map(n => n[0].replace('#/', ''));
   const fn = ROUTES[key];
   if (!fn || (!allowed.includes(key) && key !== 'dashboard')) { location.hash = '#/dashboard'; return; }
   setActiveNav(location.hash);
@@ -299,8 +306,39 @@ function setTitle(t) { const n = document.getElementById('page-title'); if (n) n
 async function viewDashboard(c) {
   setTitle('Tổng quan');
   if (State.user.role === 'admin') return dashboardAdmin(c);
+  if (isLeadUser(State.user)) return dashboardLead(c);
   if (State.user.role === 'editor') return dashboardEditor(c);
   return dashboardOrderer(c);
+}
+
+// Dashboard cho Lead: tổng quan toàn bộ order + khối lượng đang làm của team
+async function dashboardLead(c) {
+  const orders = await api('/orders');
+  c.innerHTML = '';
+  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name), el('span', { class: 'muted' }, '· Team Creatives')));
+  const cnt = (s) => orders.filter(o => o.status === s).length;
+  c.appendChild(el('div', { class: 'stat-grid' },
+    statCard('Đợi submit', cnt('Đợi submit'), '📤'),
+    statCard('Đang làm', cnt('Đang làm'), '🔨'),
+    statCard('Chờ làm', cnt('Chờ làm'), '⏳'),
+    statCard('Hoàn thành', cnt('Hoàn thành'), '✅'),
+  ));
+
+  const g = el('div', { class: 'grid-2' });
+  g.appendChild(chartCard('Khối lượng đang làm theo người', 'l-load'));
+  g.appendChild(chartCard('Order theo trạng thái', 'l-status'));
+  c.appendChild(g);
+
+  // Khối lượng đang làm (Chờ làm/Đang làm/Yêu cầu sửa) theo editor
+  const active = ['Chờ làm', 'Đang làm', 'Yêu cầu sửa'];
+  const load = {};
+  orders.forEach(o => { if (active.includes(o.status) && o.editor_name) load[o.editor_name] = (load[o.editor_name] || 0) + 1; });
+  const byStatus = {};
+  orders.forEach(o => { byStatus[o.status] = (byStatus[o.status] || 0) + 1; });
+  setTimeout(() => {
+    drawBar('l-load', Object.keys(load), Object.values(load), 'Đang phụ trách', '#d97706');
+    drawPie('l-status', Object.keys(byStatus), Object.values(byStatus));
+  }, 0);
 }
 
 function rangeQuery(days) {
@@ -439,7 +477,9 @@ let orderFilters = {};
 
 async function viewOrders(c) {
   const role = State.user.role;
-  const title = role === 'editor' ? 'Order được giao' : isOrdererRole(role) ? 'Order của tôi' : 'Quản lý Order';
+  const lead = isLeadUser(State.user);
+  const canManage = role === 'admin' || lead;
+  const title = lead ? 'Quản lý Order' : role === 'editor' ? 'Order được giao' : isOrdererRole(role) ? 'Order của tôi' : 'Quản lý Order';
   setTitle(title);
 
   const qs = new URLSearchParams(orderFilters).toString();
@@ -454,6 +494,18 @@ async function viewOrders(c) {
   if (isOrdererRole(role)) head.appendChild(el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order'));
   if (role === 'admin') head.appendChild(el('button', { class: 'btn primary', onclick: () => openOrderForm(null) }, '➕ Tạo order'));
   c.appendChild(head);
+
+  // Tab "Đợi submit" (có số lượng) cho Admin/Lead
+  if (canManage) {
+    let pending = 0;
+    try { pending = (await api('/orders?status=' + encodeURIComponent('Đợi submit'))).length; } catch (e) {}
+    const onPending = orderFilters.status === 'Đợi submit';
+    c.appendChild(el('div', { class: 'tabs' },
+      el('button', { class: onPending ? 'active' : '', onclick: () => { orderFilters.status = 'Đợi submit'; route(); } },
+        '📤 Order Đợi submit', pending ? el('span', { class: 'tab-badge' }, String(pending)) : null),
+      el('button', { class: !onPending ? 'active' : '', onclick: () => { delete orderFilters.status; route(); } }, 'Tất cả order'),
+    ));
+  }
 
   c.appendChild(renderOrderFilters());
 
@@ -496,7 +548,7 @@ function renderOrderFilters() {
   wrap.appendChild(filterInput('search', 'Tìm kiếm', 'Mã / app / mô tả', apply));
   wrap.appendChild(filterSelect('status', 'Trạng thái', [['', 'Tất cả'], ...meta.statuses.map(s => [s, s])], apply));
   wrap.appendChild(filterSelect('category', 'Loại', [['', 'Tất cả'], ['image', 'Ảnh'], ['video', 'Video']], apply));
-  if (role === 'admin') {
+  if (role === 'admin' || isLeadUser(State.user)) {
     wrap.appendChild(filterSelect('ua_id', 'Người order', [['', 'Tất cả'], ...meta.uas.map(u => [u.id, u.full_name])], apply));
     wrap.appendChild(filterSelect('editor_id', 'Người làm', [['', 'Tất cả'], ['none', '— Chưa giao —'], ...meta.editors.map(u => [u.id, u.full_name])], apply));
   }
@@ -572,7 +624,7 @@ async function openOrderDetail(id) {
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openSubmitDialog(o); } }, '✅ Giao việc & Submit'));
   }
   if (role === 'editor' && o.editor_id === State.user.id && o.status !== 'Đợi submit') footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openEditorUpdate(o); } }, '✏️ Cập nhật tiến độ'));
-  if (role === 'admin') {
+  if (role === 'admin' || isLead) {
     if (canCancel) footer.push(el('button', { class: 'btn danger', onclick: cancelOrder }, '🚫 Hủy order'));
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openOrderForm(o); } }, '✏️ Sửa'));
   }
@@ -601,9 +653,14 @@ function openEditorUpdate(o) {
     el('div', { class: 'field' }, el('label', {}, 'Note'), note),
   );
   const save = async () => {
-    await api('/orders/' + o.id, { method: 'PUT', body: { status: statusSel.value, drive_link: drive.value, youtube_link: yt.value, note: note.value } });
-    toast('Đã cập nhật');
-    closeM(); route();
+    if (statusSel.value === 'Hoàn thành') {
+      if (!drive.value.trim()) return toast('Cần điền Link Drive trước khi Hoàn thành', 'err');
+      if (o.need_youtube && !yt.value.trim()) return toast('Order này cần Link Youtube trước khi Hoàn thành', 'err');
+    }
+    try {
+      await api('/orders/' + o.id, { method: 'PUT', body: { status: statusSel.value, drive_link: drive.value, youtube_link: yt.value, note: note.value } });
+      toast('Đã cập nhật'); closeM(); route();
+    } catch (e) { toast(e.message, 'err'); }
   };
   const closeM = openModal({ title: 'Cập nhật: ' + o.order_code, body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '💾 Lưu')] });
 }
@@ -682,7 +739,7 @@ function makeCombo(items, selectedValue, placeholder, onChange) {
 async function buildOrderForm(container, order, inline, closeM) {
   const meta = State.meta;
   const role = State.user.role;
-  const isAdmin = role === 'admin';
+  const isAdmin = role === 'admin' || isLeadUser(State.user);
   const apps = await api('/apps?active=1');
   const allApps = isAdmin && order ? await api('/apps') : apps;
   const appList = (order ? allApps : apps);
@@ -1208,8 +1265,10 @@ async function viewReports(c) {
       el('div', { class: 'field' }, el('label', {}, 'Đến ngày'), toInp)));
   }
 
+  const isAdmin = State.user.role === 'admin';
+  if (!isAdmin) reportTab = 'editor'; // Lead chỉ xem hiệu suất Creatives
   const tabs = el('div', { class: 'tabs' },
-    el('button', { class: reportTab === 'ua' ? 'active' : '', onclick: () => { reportTab = 'ua'; route(); } }, '👤 Hiệu suất UA'),
+    isAdmin ? el('button', { class: reportTab === 'ua' ? 'active' : '', onclick: () => { reportTab = 'ua'; route(); } }, '👤 Hiệu suất UA') : null,
     el('button', { class: reportTab === 'editor' ? 'active' : '', onclick: () => { reportTab = 'editor'; route(); } }, '🎨 Hiệu suất Creatives'),
   );
   c.appendChild(tabs);
@@ -1279,11 +1338,12 @@ async function reportEditor(box) {
   box.appendChild(el('div', { class: 'card card-pad', style: 'margin-top:16px' }, el('h3', {}, 'Hoàn thành theo ngày'), el('div', { class: 'chart-box' }, el('canvas', { id: 'r-ed-tl' }))));
 
   const table = el('table', {},
-    el('thead', {}, el('tr', {}, el('th', {}, 'Creatives'), el('th', {}, 'Loại'), el('th', {}, 'Được giao'), el('th', {}, 'Hoàn thành'), el('th', {}, 'Điểm'), el('th', {}, 'TG TB (ngày)'))),
+    el('thead', {}, el('tr', {}, el('th', {}, 'Creatives'), el('th', {}, 'Loại'), el('th', {}, 'Đang phụ trách'), el('th', {}, 'Được giao'), el('th', {}, 'Hoàn thành'), el('th', {}, 'Điểm'), el('th', {}, 'TG TB (ngày)'))),
     el('tbody', {}, rep.perUser.length ? rep.perUser.map(u => el('tr', {}, el('td', {}, u.full_name),
       el('td', {}, editorTypeLabel(u.editor_type)),
+      el('td', {}, el('b', {}, String(u.active_orders || 0))),
       el('td', {}, u.total_orders), el('td', {}, u.done_orders), el('td', {}, fmtNum(u.total_points)), el('td', {}, u.avg_days != null ? fmtNum(u.avg_days) : '—'))) :
-      [el('tr', {}, el('td', { colspan: 6, class: 'muted', style: 'text-align:center' }, 'Chưa có dữ liệu'))]),
+      [el('tr', {}, el('td', { colspan: 7, class: 'muted', style: 'text-align:center' }, 'Chưa có dữ liệu'))]),
   );
   box.appendChild(el('div', { class: 'table-wrap', style: 'margin-top:16px' }, table));
 

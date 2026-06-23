@@ -86,7 +86,10 @@ app.post('/api/me/password', authenticate, (req, res) => {
   if (!new_password || new_password.length < 4) return res.status(400).json({ error: 'Mật khẩu mới tối thiểu 4 ký tự' });
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
   if (!bcrypt.compareSync(old_password || '', u.password_hash)) return res.status(400).json({ error: 'Mật khẩu cũ không đúng' });
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(new_password, 10), req.user.id);
+  db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(bcrypt.hashSync(new_password, 10), req.user.id);
+  // Cấp lại token cho chính phiên này để không bị đăng xuất ngay
+  const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  res.cookie('token', signToken(fresh), { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 3600 * 1000 });
   res.json({ ok: true });
 });
 
@@ -156,16 +159,11 @@ app.get('/api/orders', authenticate, (req, res) => {
 
   // Giới hạn theo role
   if (ORDERER_ROLES.includes(req.user.role)) { where.push('o.ua_id = ?'); params.push(req.user.id); }
-  else if (req.user.role === 'editor') {
-    if (isLeadUser(req.user)) {
-      // Lead: order của mình + tất cả order đang "Đợi submit"
-      where.push('(o.editor_id = ? OR o.status = ?)'); params.push(req.user.id, 'Đợi submit');
-    } else {
-      // Editor thường: chỉ order được giao và đã submit
-      where.push('o.editor_id = ? AND o.status != ?'); params.push(req.user.id, 'Đợi submit');
-    }
+  else if (req.user.role === 'editor' && !isLeadUser(req.user)) {
+    // Editor thường: chỉ order được giao và đã submit
+    where.push('o.editor_id = ? AND o.status != ?'); params.push(req.user.id, 'Đợi submit');
   }
-  // admin: xem tất cả
+  // admin & Lead: xem tất cả order
 
   const q = req.query;
   if (q.ua_id) { where.push('o.ua_id = ?'); params.push(q.ua_id); }
@@ -243,8 +241,8 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
 
   const upd = {};
 
-  if (role === 'admin') {
-    // Admin sửa được tất cả
+  if (role === 'admin' || isLead) {
+    // Admin & Lead: quản lý order như nhau (sửa, giao việc, submit...)
     const fields = ['app_id', 'app_name', 'partner', 'link_figma', 'order_date', 'objective',
       'order_type_id', 'ua_id', 'description', 'ref_link', 'size', 'note_request', 'need_youtube',
       'editor_id', 'status', 'drive_link', 'youtube_link', 'note'];
@@ -256,10 +254,6 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
     for (const f of fields) if (f in b) upd[f] = b[f];
     if (b.status === 'Yêu cầu sửa') upd.status = 'Yêu cầu sửa';
     if (b.status === 'Hủy') upd.status = 'Hủy';
-  } else if (isLead) {
-    // Lead: giao việc (assign) + submit + cập nhật tiến độ
-    const fields = ['editor_id', 'status', 'drive_link', 'youtube_link', 'note'];
-    for (const f of fields) if (f in b) upd[f] = b[f];
   } else if (role === 'editor') {
     // Editor cập nhật tiến độ & output
     const fields = ['status', 'drive_link', 'youtube_link', 'note'];
@@ -273,6 +267,14 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
   // Không cho Hủy order đã Hoàn thành
   if (b.status === 'Hủy' && o.status === 'Hoàn thành') {
     return res.status(400).json({ error: 'Order đã Hoàn thành thì không thể Hủy.' });
+  }
+
+  // Khi chuyển sang Hoàn thành: bắt buộc có Link Drive (và Link Youtube nếu order cần)
+  if (upd.status === 'Hoàn thành') {
+    const finalDrive = (('drive_link' in upd ? upd.drive_link : o.drive_link) || '').trim();
+    const finalYt = (('youtube_link' in upd ? upd.youtube_link : o.youtube_link) || '').trim();
+    if (!finalDrive) return res.status(400).json({ error: 'Cần điền Link Drive trước khi đặt Hoàn thành.' });
+    if (o.need_youtube && !finalYt) return res.status(400).json({ error: 'Order này cần Link Youtube trước khi Hoàn thành.' });
   }
 
   // Tính điểm + thời gian hoàn thành theo trạng thái cuối
@@ -345,7 +347,15 @@ app.put('/api/users/:id', authenticate, requireRole('admin'), (req, res) => {
     b.full_name ?? u.full_name, newRole,
     newRole === 'editor' ? (b.editor_type ?? u.editor_type ?? 'graphic') : null,
     b.active != null ? (b.active ? 1 : 0) : u.active, u.id);
-  if (b.password) db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(b.password, 10), u.id);
+  if (b.password) {
+    // Đổi mật khẩu -> tăng token_version để đăng xuất user đó khỏi mọi thiết bị
+    db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(bcrypt.hashSync(b.password, 10), u.id);
+    // Nếu admin đổi mật khẩu của chính mình thì cấp lại token cho phiên hiện tại
+    if (u.id === req.user.id) {
+      const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(u.id);
+      res.cookie('token', signToken(fresh), { httpOnly: true, sameSite: 'lax', maxAge: 30 * 24 * 3600 * 1000 });
+    }
+  }
   res.json(db.prepare('SELECT id, username, full_name, role, editor_type, active FROM users WHERE id = ?').get(u.id));
 });
 
@@ -536,20 +546,22 @@ app.get('/api/reports/editor', authenticate, requireRole('admin', 'editor'), (re
   const { from, to } = dateRange(req.query);
   let edFilter = '';
   const params = [from, to];
-  if (req.user.role === 'editor') { edFilter = ' AND o.editor_id = ?'; params.push(req.user.id); }
+  // Editor thường chỉ xem mình; Lead/Admin xem cả team
+  if (req.user.role === 'editor' && !isLeadUser(req.user)) { edFilter = ' AND o.editor_id = ?'; params.push(req.user.id); }
   else if (req.query.editor_id) { edFilter = ' AND o.editor_id = ?'; params.push(req.query.editor_id); }
 
   const perUser = db.prepare(`
     SELECT u.id, u.full_name, u.editor_type,
            COUNT(o.id) AS total_orders,
            SUM(CASE WHEN o.status='Hoàn thành' THEN 1 ELSE 0 END) AS done_orders,
+           SUM(CASE WHEN o.status IN ('Chờ làm','Đang làm','Yêu cầu sửa') THEN 1 ELSE 0 END) AS active_orders,
            SUM(o.points) AS total_points,
            AVG(CASE WHEN o.status='Hoàn thành' AND o.completed_at IS NOT NULL
                 THEN julianday(o.completed_at) - julianday(o.order_date) END) AS avg_days
     FROM users u
     JOIN orders o ON o.editor_id = u.id AND o.order_date BETWEEN ? AND ?${edFilter}
     WHERE u.role='editor' AND u.active = 1
-    GROUP BY u.id ORDER BY done_orders DESC
+    GROUP BY u.id ORDER BY active_orders DESC, done_orders DESC
   `).all(...params);
 
   const byStatus = db.prepare(`

@@ -48,8 +48,9 @@ function init() {
       password_hash TEXT NOT NULL,
       full_name     TEXT NOT NULL,
       role          TEXT NOT NULL,              -- admin | ua | editor | aso | po | hr
-      editor_type   TEXT,                       -- graphic | video | uiux | NULL
+      editor_type   TEXT,                       -- graphic | video | video_lead | uiux | NULL
       active        INTEGER NOT NULL DEFAULT 1,
+      token_version INTEGER NOT NULL DEFAULT 0, -- tăng lên để vô hiệu hóa phiên đăng nhập cũ
       created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     );
 
@@ -130,15 +131,10 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_orders_date   ON orders(order_date);
   `);
 
-  // Migration nhẹ: thêm cột còn thiếu cho DB cũ
+  // Migration nhẹ cho DB cũ
   const hasColumn = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col);
-  if (!hasColumn('order_types', 'note')) db.exec('ALTER TABLE order_types ADD COLUMN note TEXT');
-  if (!hasColumn('apps', 'figma_link')) db.exec('ALTER TABLE apps ADD COLUMN figma_link TEXT');
-  if (!hasColumn('orders', 'need_youtube')) db.exec('ALTER TABLE orders ADD COLUMN need_youtube INTEGER NOT NULL DEFAULT 0');
-  // Chuẩn hóa trạng thái cũ -> mới
-  db.exec("UPDATE orders SET status='Hoàn thành' WHERE status='Đã xong'");
 
-  // Migration: gỡ ràng buộc CHECK cũ trên users.role (để cho phép aso/po/hr)
+  // Gỡ ràng buộc CHECK cũ trên users.role (để cho phép aso/po/hr) — làm trước
   const urow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
   if (urow && /check/i.test(urow.sql)) {
     db.exec('PRAGMA foreign_keys=OFF');
@@ -161,6 +157,14 @@ function init() {
     `);
     db.exec('PRAGMA foreign_keys=ON');
   }
+
+  // Thêm cột còn thiếu
+  if (!hasColumn('order_types', 'note')) db.exec('ALTER TABLE order_types ADD COLUMN note TEXT');
+  if (!hasColumn('apps', 'figma_link')) db.exec('ALTER TABLE apps ADD COLUMN figma_link TEXT');
+  if (!hasColumn('orders', 'need_youtube')) db.exec('ALTER TABLE orders ADD COLUMN need_youtube INTEGER NOT NULL DEFAULT 0');
+  if (!hasColumn('users', 'token_version')) db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
+  // Chuẩn hóa trạng thái cũ -> mới
+  db.exec("UPDATE orders SET status='Hoàn thành' WHERE status='Đã xong'");
 }
 
 // Sinh mã order kế tiếp. label: 'V' cho video, 'A' cho ảnh.

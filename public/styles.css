@@ -224,6 +224,7 @@ textarea { resize: vertical; min-height: 70px; }
   color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px;
 }
 .tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 6px; background: var(--danger); color: #fff; border-radius: 10px; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
 .overlay-backdrop { display: none; }
 
 .spinner { width: 34px; height: 34px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; margin: 60px auto; }
