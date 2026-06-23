@@ -151,9 +151,10 @@ app.get('/api/meta', authenticate, (req, res) => {
   const orderTypes = db.prepare('SELECT id, category, name, points, quantity_note, note FROM order_types ORDER BY sort_order').all();
   const editors = db.prepare("SELECT id, full_name, editor_type FROM users WHERE role='editor' AND active=1 ORDER BY full_name").all();
   const uas = db.prepare("SELECT id, full_name FROM users WHERE role='ua' AND active=1 ORDER BY full_name").all();
+  const pos = db.prepare("SELECT id, full_name FROM users WHERE role='po' AND active=1 ORDER BY full_name").all();
   const partners = db.prepare('SELECT name FROM partners ORDER BY name').all().map(p => p.name);
   res.json({
-    orderTypes, editors, uas, partners,
+    orderTypes, editors, uas, pos, partners,
     statuses: STATUSES,
     appStatuses: APP_STATUSES,
     sizes: getSizesGrouped(),
@@ -162,13 +163,42 @@ app.get('/api/meta', authenticate, (req, res) => {
 
 // ---- Apps ----------------------------------------------------------------
 
+// Gắn danh sách UA/PO được phụ trách vào từng app
+function attachAssignees(apps) {
+  if (!apps.length) return apps;
+  const rows = db.prepare('SELECT au.app_id, u.id, u.full_name, u.role FROM app_users au JOIN users u ON u.id = au.user_id').all();
+  const byApp = {};
+  rows.forEach(r => { (byApp[r.app_id] = byApp[r.app_id] || []).push(r); });
+  apps.forEach(a => {
+    const list = byApp[a.id] || [];
+    a.uas = list.filter(x => x.role === 'ua').map(x => ({ id: x.id, full_name: x.full_name }));
+    a.pos = list.filter(x => x.role === 'po').map(x => ({ id: x.id, full_name: x.full_name }));
+  });
+  return apps;
+}
+function setAppAssignees(appId, uaIds, poIds) {
+  db.prepare('DELETE FROM app_users WHERE app_id = ?').run(appId);
+  const valid = new Set(db.prepare("SELECT id FROM users WHERE role IN ('ua','po')").all().map(u => u.id));
+  const ins = db.prepare('INSERT OR IGNORE INTO app_users (app_id, user_id) VALUES (?, ?)');
+  [...(uaIds || []), ...(poIds || [])].map(Number).forEach(uid => { if (valid.has(uid)) ins.run(appId, uid); });
+}
+
 app.get('/api/apps', authenticate, (req, res) => {
-  let sql = 'SELECT * FROM apps';
+  let sql = 'SELECT a.* FROM apps a';
   const params = [];
-  if (req.query.status) { sql += ' WHERE status = ?'; params.push(req.query.status); }
-  else if (req.query.active === '1') { sql += " WHERE status IN ('Đang chạy','Đợi bàn giao')"; }
-  sql += ' ORDER BY code';
-  res.json(db.prepare(sql).all(...params));
+  const where = [];
+  if (req.query.for_order === '1') {
+    // Danh sách app có thể tạo order: đang chạy/đợi bàn giao; UA/PO chỉ thấy app được giao
+    where.push("a.status IN ('Đang chạy','Đợi bàn giao')");
+    if (req.user.role === 'ua' || req.user.role === 'po') {
+      sql += ' JOIN app_users au ON au.app_id = a.id AND au.user_id = ?';
+      params.push(req.user.id);
+    }
+  } else if (req.query.status) { where.push('a.status = ?'); params.push(req.query.status); }
+  else if (req.query.active === '1') { where.push("a.status IN ('Đang chạy','Đợi bàn giao')"); }
+  if (where.length) sql += ' WHERE ' + where.join(' AND ');
+  sql += ' ORDER BY a.code';
+  res.json(attachAssignees(db.prepare(sql).all(...params)));
 });
 
 app.post('/api/apps', authenticate, requireRole('admin'), (req, res) => {
@@ -179,7 +209,8 @@ app.post('/api/apps', authenticate, requireRole('admin'), (req, res) => {
       VALUES (?,?,?,?,?,?,?,?,?)`).run(
       b.code, b.name, b.partner || '', b.link || '', b.figma_link || '', b.app_code || '',
       b.mkter || '', b.product_manager || '', b.status || 'Đang chạy');
-    res.json(db.prepare('SELECT * FROM apps WHERE id = ?').get(r.lastInsertRowid));
+    setAppAssignees(r.lastInsertRowid, b.ua_ids, b.po_ids);
+    res.json(attachAssignees([db.prepare('SELECT * FROM apps WHERE id = ?').get(r.lastInsertRowid)])[0]);
   } catch (e) {
     res.status(400).json({ error: 'Mã app đã tồn tại hoặc dữ liệu không hợp lệ' });
   }
@@ -193,7 +224,8 @@ app.put('/api/apps/:id', authenticate, requireRole('admin'), (req, res) => {
     b.code ?? app0.code, b.name ?? app0.name, b.partner ?? app0.partner, b.link ?? app0.link,
     b.figma_link ?? app0.figma_link, b.app_code ?? app0.app_code, b.mkter ?? app0.mkter, b.product_manager ?? app0.product_manager,
     b.status ?? app0.status, req.params.id);
-  res.json(db.prepare('SELECT * FROM apps WHERE id = ?').get(req.params.id));
+  if (Array.isArray(b.ua_ids) || Array.isArray(b.po_ids)) setAppAssignees(req.params.id, b.ua_ids, b.po_ids);
+  res.json(attachAssignees([db.prepare('SELECT * FROM apps WHERE id = ?').get(req.params.id)])[0]);
 });
 
 app.delete('/api/apps/:id', authenticate, requireRole('admin'), (req, res) => {
@@ -260,7 +292,17 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'h
   let partner = b.partner || '';
   if (b.app_id) {
     const ap = db.prepare('SELECT * FROM apps WHERE id = ?').get(b.app_id);
-    if (ap) { appName = appName || ap.name; partner = partner || ap.partner; }
+    if (!ap) return res.status(400).json({ error: 'App không tồn tại' });
+    // App phải đang chạy / đợi bàn giao mới được tạo order
+    if (!['Đang chạy', 'Đợi bàn giao'].includes(ap.status)) {
+      return res.status(400).json({ error: 'App "' + ap.code + '" đang ở trạng thái Dừng, không thể tạo order' });
+    }
+    // UA/PO chỉ được order cho app mình được giao phụ trách
+    if (req.user.role === 'ua' || req.user.role === 'po') {
+      const assigned = db.prepare('SELECT 1 FROM app_users WHERE app_id = ? AND user_id = ?').get(b.app_id, req.user.id);
+      if (!assigned) return res.status(403).json({ error: 'Bạn chưa được giao phụ trách app này nên không thể tạo order' });
+    }
+    appName = appName || ap.name; partner = partner || ap.partner;
   }
 
   const editorId = b.editor_id ? Number(b.editor_id) : null;

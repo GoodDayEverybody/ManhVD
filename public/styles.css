@@ -148,6 +148,7 @@ textarea { resize: vertical; min-height: 70px; }
 .size-grid { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
 .size-check { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; font-size: 13px; }
 .size-check input[type=checkbox] { width: auto; margin: 0; }
+.multi-check { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: #fff; max-height: 150px; overflow-y: auto; }
 .size-group-title { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--primary); font-weight: 700; margin: 12px 0 6px; }
 .size-group-head { display: flex; align-items: center; gap: 14px; margin: 12px 0 6px; }
 .size-group-head .size-group-title { margin: 0; }

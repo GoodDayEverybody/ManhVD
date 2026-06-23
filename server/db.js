@@ -76,6 +76,13 @@ function init() {
       name TEXT UNIQUE NOT NULL
     );
 
+    -- Gán UA/PO phụ trách cho app (1 app nhiều UA/PO; 1 user nhiều app)
+    CREATE TABLE IF NOT EXISTS app_users (
+      app_id  INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY (app_id, user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS order_types (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       category      TEXT NOT NULL CHECK (category IN ('image','video')),

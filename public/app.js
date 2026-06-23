@@ -870,6 +870,20 @@ async function openOrderForm(order) {
 }
 
 // Dropdown có ô tìm kiếm. items: [{value, label}]. Trả { node, getValue }
+// Chọn nhiều người từ danh sách (checkbox). users: [{id, full_name}]
+function multiCheck(users, selectedIds) {
+  const sel = new Set((selectedIds || []).map(Number));
+  const inputs = [];
+  const wrap = el('div', { class: 'multi-check' });
+  if (!users.length) wrap.appendChild(el('span', { class: 'hint' }, 'Chưa có người dùng phù hợp'));
+  users.forEach(u => {
+    const cb = el('input', { type: 'checkbox', value: u.id, checked: sel.has(Number(u.id)) });
+    inputs.push(cb);
+    wrap.appendChild(el('label', { class: 'size-check' }, cb, el('span', {}, u.full_name)));
+  });
+  return { node: wrap, getValues: () => inputs.filter(i => i.checked).map(i => Number(i.value)) };
+}
+
 function makeCombo(items, selectedValue, placeholder, onChange) {
   let value = (selectedValue != null && selectedValue !== '') ? String(selectedValue) : '';
   const wrap = el('div', { class: 'combo' });
@@ -907,7 +921,8 @@ async function buildOrderForm(container, order, inline, closeM) {
   const meta = State.meta;
   const role = State.user.role;
   const isAdmin = role === 'admin';
-  const apps = await api('/apps?active=1');
+  // Danh sách app có thể tạo order (đang chạy/đợi bàn giao; UA/PO chỉ thấy app được giao)
+  const apps = await api('/apps?for_order=1');
   const allApps = isAdmin && order ? await api('/apps') : apps;
   const appList = (order ? allApps : apps);
 
@@ -1097,8 +1112,8 @@ async function viewApps(c) {
       el('td', {}, el('span', { class: 'code-cell' }, a.code)),
       el('td', {}, a.link ? el('a', { href: a.link, target: '_blank' }, a.name) : a.name),
       el('td', {}, a.partner || '—'),
-      el('td', {}, a.mkter || '—'),
-      el('td', {}, a.product_manager || '—'),
+      el('td', {}, (a.uas && a.uas.length) ? a.uas.map(u => u.full_name).join(', ') : (a.mkter || '—')),
+      el('td', {}, (a.pos && a.pos.length) ? a.pos.map(u => u.full_name).join(', ') : (a.product_manager || '—')),
       el('td', {}, appStatusBadge(a.status)),
       el('td', { class: 'nowrap' },
         el('button', { class: 'btn sm', onclick: () => openAppForm(a) }, '✏️'),
@@ -1133,17 +1148,23 @@ function openAppForm(a) {
   if (a && a.partner && !partnerOpts.includes(a.partner)) partnerOpts.unshift(a.partner);
   const partnerSel = el('select', {}, partnerOpts.map(p => el('option', { value: p, selected: a ? a.partner === p : p === 'Yutalabs' }, p)));
 
+  // UA/PO phụ trách: chọn nhiều từ danh sách user trong DB (không nhập tay)
+  const uaPick = multiCheck(meta.uas || [], a && a.uas ? a.uas.map(u => u.id) : []);
+  const poPick = multiCheck(meta.pos || [], a && a.pos ? a.pos.map(u => u.id) : []);
+
   const body = el('div', {},
     el('div', { class: 'form-row' }, codeField, nameField),
     el('div', { class: 'form-row' },
       el('div', { class: 'field' }, el('label', {}, 'Đối tác'), partnerSel),
       el('div', { class: 'field' }, el('label', {}, 'Mã CODE (tự tạo)'), appCode)),
     el('div', { class: 'form-row' }, mk('link', 'Link app (store)', a && a.link), mk('figma_link', 'Link Figma', a && a.figma_link)),
-    el('div', { class: 'form-row' }, mk('mkter', 'UA', a && a.mkter), mk('product_manager', 'PO', a && a.product_manager)),
+    el('div', { class: 'form-row' },
+      el('div', { class: 'field' }, el('label', {}, 'UA phụ trách'), uaPick.node),
+      el('div', { class: 'field' }, el('label', {}, 'PO phụ trách'), poPick.node)),
     el('div', { class: 'field' }, el('label', {}, 'Tình trạng'), status),
   );
   const save = async () => {
-    const payload = { status: status.value, app_code: appCode.value, partner: partnerSel.value };
+    const payload = { status: status.value, app_code: appCode.value, partner: partnerSel.value, ua_ids: uaPick.getValues(), po_ids: poPick.getValues() };
     for (const k in f) payload[k] = f[k].value;
     if (!payload.code || !payload.name) return toast('Cần Mã app và Tên app', 'err');
     try {
