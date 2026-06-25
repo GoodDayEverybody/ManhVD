@@ -1257,18 +1257,21 @@ function openUserForm(u, presetRole) {
   if (isAdminAcc) role.disabled = true;
   const pass = el('input', { type: 'text', placeholder: u ? 'Để trống nếu không đổi' : 'Mặc định 123456' });
   const active = el('select', {}, el('option', { value: '1', selected: !u || u.active }, 'Hoạt động'), el('option', { value: '0', selected: u && !u.active }, 'Khóa'));
+  const discord = el('input', { value: u && u.discord_id ? u.discord_id : '', placeholder: 'VD: 712345678901234567' });
 
   const body = el('div', {},
     el('div', { class: 'field' }, el('label', {}, 'Họ tên *'), fullName),
     el('div', { class: 'field' }, el('label', {}, 'Username *'), username, u ? el('div', { class: 'hint' }, 'Không thể đổi username') : null),
     el('div', { class: 'form-row' }, el('div', { class: 'field' }, el('label', {}, 'Vai trò'), role, isAdminAcc ? el('div', { class: 'hint' }, 'Tài khoản Admin không thể đổi vai trò') : null),
       el('div', { class: 'field' }, el('label', {}, 'Mật khẩu'), pass)),
+    el('div', { class: 'field' }, el('label', {}, 'Discord ID (để @tag khi báo Discord)'), discord,
+      el('div', { class: 'hint' }, 'Discord → Settings → Advanced → bật Developer Mode → chuột phải tên người → Copy User ID')),
     u ? el('div', { class: 'field' }, el('label', {}, 'Trạng thái'), active) : null,
   );
 
   const save = async () => {
     const [r, et] = role.value.split(':');
-    const payload = { full_name: fullName.value, role: r, editor_type: et || null };
+    const payload = { full_name: fullName.value, role: r, editor_type: et || null, discord_id: discord.value.trim() };
     if (pass.value) payload.password = pass.value;
     try {
       if (u) { payload.active = Number(active.value); await api('/users/' + u.id, { method: 'PUT', body: payload }); }
@@ -1370,7 +1373,7 @@ async function viewSettings(c) {
   c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Cài đặt'),
     el('span', { class: 'muted' }, '· dữ liệu nguồn cho các ô chọn ở những trang khác')));
 
-  const TABS = [['ua', '👤 UA'], ['editor', '🎨 Editor'], ['partner', '🤝 Đối tác'], ['image', '🖼️ Loại order ảnh'], ['video', '🎬 Loại order video'], ['sizes', '📐 Size ảnh'], ['import', '📥 Nhập dữ liệu']];
+  const TABS = [['ua', '👤 UA'], ['editor', '🎨 Editor'], ['partner', '🤝 Đối tác'], ['image', '🖼️ Loại order ảnh'], ['video', '🎬 Loại order video'], ['sizes', '📐 Size ảnh'], ['import', '📥 Nhập dữ liệu'], ['discord', '🤖 Discord']];
   c.appendChild(el('div', { class: 'tabs' }, TABS.map(([k, label]) =>
     el('button', { class: settingsTab === k ? 'active' : '', onclick: () => { settingsTab = k; route(); } }, label))));
 
@@ -1382,7 +1385,48 @@ async function viewSettings(c) {
   else if (settingsTab === 'image') await settingsTypes(box, 'image');
   else if (settingsTab === 'video') await settingsTypes(box, 'video');
   else if (settingsTab === 'sizes') await settingsSizes(box);
-  else settingsImport(box);
+  else if (settingsTab === 'import') settingsImport(box);
+  else await settingsDiscord(box);
+}
+
+async function settingsDiscord(box) {
+  box.innerHTML = '';
+  let cfg = { url: '', enabled: false };
+  try { cfg = await api('/settings/discord'); } catch (e) {}
+
+  const enable = el('input', { type: 'checkbox', checked: cfg.enabled ? true : false });
+  const urlInp = el('input', { value: cfg.url || '', placeholder: 'https://discord.com/api/webhooks/...', style: 'width:100%' });
+
+  const save = async () => {
+    try {
+      await api('/settings/discord', { method: 'PUT', body: { url: urlInp.value.trim(), enabled: enable.checked } });
+      toast('Đã lưu cấu hình Discord');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const test = async () => {
+    try {
+      await api('/settings/discord/test', { method: 'POST', body: { url: urlInp.value.trim() } });
+      toast('Đã gửi tin thử — kiểm tra kênh Discord 🎉');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  box.appendChild(el('div', { class: 'card card-pad', style: 'max-width:680px' },
+    el('h3', {}, '🤖 Thông báo qua Discord'),
+    el('p', { class: 'hint', style: 'margin-bottom:12px' },
+      'Hệ thống sẽ tự nhắn vào kênh Discord khi: order mới tạo, hoàn thành, yêu cầu sửa, bị hủy. ' +
+      'Muốn @tag đích danh ai thì điền Discord ID cho người đó ở mục Quản lý User.'),
+    el('label', { class: 'size-check', style: 'margin-bottom:12px' }, enable, el('span', {}, 'Bật thông báo Discord')),
+    el('div', { class: 'field' }, el('label', {}, 'Webhook URL'), urlInp),
+    el('div', { style: 'display:flex; gap:10px; margin-top:6px' },
+      el('button', { class: 'btn primary', onclick: save }, '💾 Lưu'),
+      el('button', { class: 'btn', onclick: test }, '🔔 Gửi thử')),
+    el('details', { style: 'margin-top:14px' },
+      el('summary', { style: 'cursor:pointer; font-weight:600' }, 'Cách lấy Webhook URL?'),
+      el('ol', { style: 'margin:8px 0 0 18px; font-size:13px; line-height:1.7' },
+        el('li', {}, 'Vào kênh Discord muốn nhận thông báo → bấm ⚙️ (Edit Channel).'),
+        el('li', {}, 'Integrations → Webhooks → New Webhook.'),
+        el('li', {}, 'Đặt tên (vd "Order Bot") → Copy Webhook URL → dán vào ô trên → Lưu.'))),
+  ));
 }
 
 const APP_CSV_HEADERS = { 'ma app': 'code', 'ten app': 'name', 'doi tac': 'partner', 'link app': 'link', 'link figma': 'figma_link', 'ua': 'mkter', 'po': 'product_manager', 'tinh trang': 'status' };

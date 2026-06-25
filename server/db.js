@@ -139,6 +139,12 @@ function init() {
     CREATE INDEX IF NOT EXISTS idx_orders_app    ON orders(app_id);
     CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
     CREATE INDEX IF NOT EXISTS idx_orders_date   ON orders(order_date);
+
+    -- Cấu hình chung dạng key/value (vd webhook Discord)
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT
+    );
   `);
 
   // Migration nhẹ cho DB cũ
@@ -176,6 +182,7 @@ function init() {
   if (!hasColumn('users', 'totp_secret')) db.exec('ALTER TABLE users ADD COLUMN totp_secret TEXT');
   if (!hasColumn('users', 'totp_enabled')) db.exec('ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0');
   if (!hasColumn('users', 'must_change_password')) db.exec('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  if (!hasColumn('users', 'discord_id')) db.exec('ALTER TABLE users ADD COLUMN discord_id TEXT');
   // Chuẩn hóa trạng thái cũ -> mới
   db.exec("UPDATE orders SET status='Hoàn thành' WHERE status='Đã xong'");
 }
@@ -196,4 +203,14 @@ function nextOrderCode(label) {
   return label + value;
 }
 
-module.exports = { db, init, nextOrderCode, tx, DB_PATH };
+// Cấu hình key/value
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+function setSetting(key, value) {
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(key, value == null ? null : String(value));
+}
+
+module.exports = { db, init, nextOrderCode, tx, DB_PATH, getSetting, setSetting };

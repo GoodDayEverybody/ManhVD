@@ -7,7 +7,7 @@ const bcrypt = require('bcryptjs');
 const { authenticator } = require('otplib');
 const QRCode = require('qrcode');
 
-const { db, init, nextOrderCode } = require('./db');
+const { db, init, nextOrderCode, getSetting, setSetting } = require('./db');
 const { signToken, authenticate, requireRole } = require('./auth');
 
 // 2FA cho phép lệch ±1 bước thời gian (30s) để tránh kẹt do lệch giờ
@@ -48,7 +48,9 @@ const ORDER_SELECT = `
          t.quantity_note   AS quantity_note,
          a.code            AS app_code,
          a.link            AS app_link,
-         a.figma_link      AS app_figma
+         a.figma_link      AS app_figma,
+         ua.discord_id     AS ua_discord,
+         ed.discord_id     AS editor_discord
   FROM orders o
   LEFT JOIN users ua  ON ua.id = o.ua_id
   LEFT JOIN users ed  ON ed.id = o.editor_id
@@ -63,6 +65,51 @@ function getOrder(id) {
 function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// ---- Thông báo Discord (webhook) ----------------------------------------
+// event: 'created' | 'completed' | 'rework' | 'cancelled'
+function buildDiscordMessage(o, event) {
+  const mention = (id) => (id ? ' <@' + id + '>' : '');
+  const appLabel = o.app_code || o.app_name || '—';
+  const type = o.order_type_name || '';
+  const head = '`' + o.order_code + '` · **' + appLabel + '**' + (type ? ' · ' + type : '');
+  if (event === 'created') {
+    return '🆕 **Order mới** ' + head +
+      '\nNgười order: ' + (o.ua_name || '—') + ' → Giao cho: ' + (o.editor_name || 'Chưa giao') + mention(o.editor_discord);
+  }
+  if (event === 'completed') {
+    return '✅ **Order HOÀN THÀNH** ' + head +
+      '\nNgười làm: ' + (o.editor_name || '—') + ' · Gửi: ' + (o.ua_name || '—') + mention(o.ua_discord) +
+      (o.drive_link ? '\nDrive: ' + o.drive_link : '');
+  }
+  if (event === 'rework') {
+    return '✏️ **Order YÊU CẦU SỬA** ' + head +
+      '\nEditor: ' + (o.editor_name || '—') + mention(o.editor_discord);
+  }
+  if (event === 'cancelled') {
+    return '🚫 **Order BỊ HỦY** ' + head +
+      '\nEditor: ' + (o.editor_name || '—') + mention(o.editor_discord);
+  }
+  return null;
+}
+
+async function notifyDiscord(order, event) {
+  try {
+    if (getSetting('discord_enabled') !== '1') return;
+    const url = (getSetting('discord_webhook_url') || '').trim();
+    if (!url) return;
+    const content = buildDiscordMessage(order, event);
+    if (!content) return;
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // allowed_mentions: cho phép tag user
+      body: JSON.stringify({ content, allowed_mentions: { parse: ['users'] } }),
+    });
+  } catch (e) {
+    console.error('[discord] gửi thất bại:', e.message);
+  }
 }
 
 // ---- Auth routes ---------------------------------------------------------
@@ -344,7 +391,9 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'h
     b.description || '', b.ref_link || '', b.size || '', b.note_request || '',
     editorId, initStatus, 0, needYoutube);
 
-  res.json(getOrder(r.lastInsertRowid));
+  const created = getOrder(r.lastInsertRowid);
+  notifyDiscord(created, 'created');
+  res.json(created);
 });
 
 app.put('/api/orders/:id', authenticate, (req, res) => {
@@ -418,7 +467,14 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
     const setSql = keys.map(k => `${k} = @${k}`).join(', ');
     db.prepare(`UPDATE orders SET ${setSql} WHERE id = @id`).run({ ...upd, id: o.id });
   }
-  res.json(getOrder(o.id));
+  const updated = getOrder(o.id);
+  // Báo Discord khi đổi trạng thái (chỉ khi thực sự chuyển sang trạng thái mới)
+  if (finalStatus !== o.status) {
+    if (finalStatus === 'Hoàn thành') notifyDiscord(updated, 'completed');
+    else if (finalStatus === 'Yêu cầu sửa') notifyDiscord(updated, 'rework');
+    else if (finalStatus === 'Hủy') notifyDiscord(updated, 'cancelled');
+  }
+  res.json(updated);
 });
 
 // Assign nhanh editor (admin)
@@ -440,7 +496,7 @@ app.delete('/api/orders/:id', authenticate, requireRole('admin'), (req, res) => 
 // ---- Users (admin) -------------------------------------------------------
 
 app.get('/api/users', authenticate, requireRole('admin'), (req, res) => {
-  let sql = 'SELECT id, username, full_name, role, editor_type, active, totp_enabled, created_at FROM users';
+  let sql = 'SELECT id, username, full_name, role, editor_type, active, totp_enabled, discord_id, created_at FROM users';
   const params = [];
   if (req.query.role) { sql += ' WHERE role = ?'; params.push(req.query.role); }
   sql += ' ORDER BY role, full_name';
@@ -452,9 +508,10 @@ app.post('/api/users', authenticate, requireRole('admin'), (req, res) => {
   if (!b.username || !b.full_name || !b.role) return res.status(400).json({ error: 'Thiếu thông tin' });
   if (!['admin', 'ua', 'editor', 'aso', 'po', 'hr'].includes(b.role)) return res.status(400).json({ error: 'Role không hợp lệ' });
   try {
-    const r = db.prepare('INSERT INTO users (username, password_hash, full_name, role, editor_type, must_change_password) VALUES (?,?,?,?,?,1)').run(
+    const r = db.prepare('INSERT INTO users (username, password_hash, full_name, role, editor_type, discord_id, must_change_password) VALUES (?,?,?,?,?,?,1)').run(
       String(b.username).trim().toLowerCase(), bcrypt.hashSync(b.password || '123456', 10),
-      b.full_name, b.role, b.role === 'editor' ? (b.editor_type || 'graphic') : null);
+      b.full_name, b.role, b.role === 'editor' ? (b.editor_type || 'graphic') : null,
+      (b.discord_id || '').trim() || null);
     res.json(db.prepare('SELECT id, username, full_name, role, editor_type, active FROM users WHERE id = ?').get(r.lastInsertRowid));
   } catch (e) {
     res.status(400).json({ error: 'Username đã tồn tại' });
@@ -467,10 +524,11 @@ app.put('/api/users/:id', authenticate, requireRole('admin'), (req, res) => {
   const b = req.body || {};
   // Tài khoản Admin luôn giữ vai trò Admin, không cho đổi
   const newRole = u.role === 'admin' ? 'admin' : (b.role ?? u.role);
-  db.prepare('UPDATE users SET full_name=?, role=?, editor_type=?, active=? WHERE id=?').run(
+  db.prepare('UPDATE users SET full_name=?, role=?, editor_type=?, active=?, discord_id=? WHERE id=?').run(
     b.full_name ?? u.full_name, newRole,
     newRole === 'editor' ? (b.editor_type ?? u.editor_type ?? 'graphic') : null,
-    b.active != null ? (b.active ? 1 : 0) : u.active, u.id);
+    b.active != null ? (b.active ? 1 : 0) : u.active,
+    'discord_id' in b ? ((b.discord_id || '').trim() || null) : u.discord_id, u.id);
   if (b.password) {
     // Đổi mật khẩu -> tăng token_version (đăng xuất mọi thiết bị) + bắt user đổi lại mật khẩu tạm này
     db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1, must_change_password = 1 WHERE id = ?').run(bcrypt.hashSync(b.password, 10), u.id);
@@ -659,6 +717,41 @@ app.post('/api/import/users', authenticate, requireRole('admin'), (req, res) => 
     } catch (e) { errors.push('Dòng ' + (i + 2) + ': ' + e.message); }
   }
   res.json({ created, errors });
+});
+
+// ---- Cấu hình thông báo Discord -----------------------------------------
+
+app.get('/api/settings/discord', authenticate, requireRole('admin'), (req, res) => {
+  res.json({
+    url: getSetting('discord_webhook_url') || '',
+    enabled: getSetting('discord_enabled') === '1',
+  });
+});
+
+app.put('/api/settings/discord', authenticate, requireRole('admin'), (req, res) => {
+  const b = req.body || {};
+  if (typeof b.url === 'string') setSetting('discord_webhook_url', b.url.trim());
+  setSetting('discord_enabled', b.enabled ? '1' : '0');
+  res.json({
+    url: getSetting('discord_webhook_url') || '',
+    enabled: getSetting('discord_enabled') === '1',
+  });
+});
+
+app.post('/api/settings/discord/test', authenticate, requireRole('admin'), async (req, res) => {
+  const url = ((req.body && req.body.url) || getSetting('discord_webhook_url') || '').trim();
+  if (!url) return res.status(400).json({ error: 'Chưa có link webhook' });
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: '🔔 Test từ hệ thống Order Creatives — webhook hoạt động!' }),
+    });
+    if (!r.ok) return res.status(400).json({ error: 'Discord trả về lỗi ' + r.status });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: 'Không gửi được: ' + e.message });
+  }
 });
 
 // ---- Reports -------------------------------------------------------------
