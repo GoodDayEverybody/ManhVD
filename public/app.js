@@ -803,6 +803,10 @@ async function openOrderDetail(id) {
   if ((isLead || role === 'admin') && o.status === 'Đợi submit') {
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openSubmitDialog(o); } }, '✅ Giao việc & Submit'));
   }
+  // Lead/Admin: đổi người làm sau khi đã submit (vd người được giao ban đầu đang bận)
+  if ((isLead || role === 'admin') && o.category === 'video' && ['Chờ làm', 'Đang làm', 'Yêu cầu sửa'].includes(o.status)) {
+    footer.push(el('button', { class: 'btn', onclick: () => { closeM(); openReassignDialog(o); } }, '🔄 Đổi người làm'));
+  }
   if (role === 'editor' && o.editor_id === State.user.id && o.status !== 'Đợi submit') footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openEditorUpdate(o); } }, '✏️ Cập nhật tiến độ'));
   if (role === 'admin') {
     if (canCancel) footer.push(el('button', { class: 'btn danger', onclick: cancelOrder }, '🚫 Hủy order'));
@@ -863,6 +867,30 @@ function openSubmitDialog(o) {
     } catch (e) { toast(e.message, 'err'); }
   };
   const closeM = openModal({ title: 'Giao việc: ' + o.order_code, body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: submit }, '✅ Submit')] });
+}
+
+/* ---- Lead/Admin: đổi người làm sau khi đã submit ---- */
+function openReassignDialog(o) {
+  const meta = State.meta;
+  // Order video -> chỉ chọn trong nhóm video / video lead
+  const editorSel = el('select', {}, el('option', { value: '' }, '— Chọn người làm —'),
+    meta.editors
+      .filter(u => u.editor_type === 'video' || u.editor_type === 'video_lead')
+      .map(u => el('option', { value: u.id, selected: o.editor_id === u.id }, u.full_name + ' (' + editorTypeLabel(u.editor_type) + ')')));
+  const body = el('div', {},
+    el('p', { class: 'hint', style: 'margin-bottom:10px' }, 'Đổi người thực hiện order (vd: người được giao ban đầu đang bận). Trạng thái order giữ nguyên, người mới sẽ nhận được order này.'),
+    el('div', { class: 'field' }, el('label', {}, 'Người làm hiện tại'), el('div', { class: 'hint', style: 'margin:0' }, o.editor_name || '—')),
+    el('div', { class: 'field' }, el('label', {}, 'Đổi sang'), editorSel),
+  );
+  const save = async () => {
+    if (!editorSel.value) return toast('Vui lòng chọn người làm', 'err');
+    if (Number(editorSel.value) === o.editor_id) return toast('Đây vẫn là người đang được giao', 'err');
+    try {
+      await api('/orders/' + o.id, { method: 'PUT', body: { editor_id: Number(editorSel.value) } });
+      toast('Đã đổi người làm'); closeM(); route();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const closeM = openModal({ title: 'Đổi người làm: ' + o.order_code, body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '🔄 Đổi người làm')] });
 }
 
 /* ============================ Order form (create/edit) ============================ */

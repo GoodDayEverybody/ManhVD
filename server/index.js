@@ -68,7 +68,7 @@ function todayStr() {
 }
 
 // ---- Thông báo Discord (webhook) ----------------------------------------
-// event: 'created' | 'completed' | 'rework' | 'cancelled'
+// event: 'created' | 'completed' | 'rework' | 'cancelled' | 'reassigned'
 function buildDiscordMessage(o, event) {
   const mention = (id) => (id ? ' <@' + id + '>' : '');
   const appLabel = o.app_code || o.app_name || '—';
@@ -90,6 +90,10 @@ function buildDiscordMessage(o, event) {
   if (event === 'cancelled') {
     return '🚫 **Order BỊ HỦY** ' + head +
       '\nEditor: ' + (o.editor_name || '—') + mention(o.editor_discord);
+  }
+  if (event === 'reassigned') {
+    return '🔄 **Order ĐỔI NGƯỜI LÀM** ' + head +
+      '\nGiao cho: ' + (o.editor_name || '—') + mention(o.editor_discord);
   }
   return null;
 }
@@ -474,6 +478,11 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
     else if (finalStatus === 'Yêu cầu sửa') notifyDiscord(updated, 'rework');
     else if (finalStatus === 'Hủy') notifyDiscord(updated, 'cancelled');
   }
+  // Lead đổi người làm sau khi đã submit (order không còn ở "Đợi submit"):
+  // báo cho người mới được giao. Bỏ qua khi order vừa bị Hủy.
+  const editorReassigned = ('editor_id' in upd) && upd.editor_id
+    && Number(upd.editor_id) !== o.editor_id && o.status !== 'Đợi submit';
+  if (editorReassigned && finalStatus !== 'Hủy') notifyDiscord(updated, 'reassigned');
   res.json(updated);
 });
 
