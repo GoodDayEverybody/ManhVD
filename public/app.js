@@ -1324,15 +1324,44 @@ function renderAssigneeList(c, users, apps, role) {
   c.appendChild(el('div', { class: 'table-wrap' }, table));
 }
 
+// Bảng tick chọn nhiều app (luôn mở, có ô tìm + chọn/bỏ tất cả). items: [{id, label}]
+function appChecklist(items, selectedIds) {
+  const sel = new Set((selectedIds || []).map(Number));
+  const counter = el('span', { class: 'muted' }, '');
+  const search = el('input', { class: 'combo-search', placeholder: '🔍 Tìm theo mã / tên app...' });
+  const listBox = el('div', { class: 'checklist-box' });
+  let curFilter = '';
+  const updateCounter = () => { counter.textContent = 'Đã chọn ' + sel.size + ' / ' + items.length + ' app'; };
+  const matching = () => { const f = curFilter.trim().toLowerCase(); return items.filter(it => it.label.toLowerCase().includes(f)); };
+  const render = () => {
+    listBox.innerHTML = '';
+    const matched = matching();
+    if (!matched.length) { listBox.appendChild(el('div', { class: 'combo-empty' }, 'Không tìm thấy app')); return; }
+    matched.forEach(it => {
+      const cb = el('input', { type: 'checkbox', checked: sel.has(Number(it.id)) });
+      const opt = el('label', { class: 'combo-opt' + (sel.has(Number(it.id)) ? ' sel' : '') }, cb, el('span', {}, it.label));
+      cb.addEventListener('change', () => { if (cb.checked) sel.add(Number(it.id)); else sel.delete(Number(it.id)); opt.classList.toggle('sel', cb.checked); updateCounter(); });
+      listBox.appendChild(opt);
+    });
+  };
+  const selAll = el('button', { type: 'button', class: 'btn sm', onclick: () => { matching().forEach(it => sel.add(Number(it.id))); render(); updateCounter(); } }, '✓ Chọn tất cả');
+  const clrAll = el('button', { type: 'button', class: 'btn sm', onclick: () => { sel.clear(); render(); updateCounter(); } }, '✕ Bỏ hết');
+  search.addEventListener('input', () => { curFilter = search.value; render(); });
+  const header = el('div', { style: 'display:flex; align-items:center; gap:8px; margin:8px 0; flex-wrap:wrap' }, counter, el('span', { class: 'spacer' }), selAll, clrAll);
+  const node = el('div', {}, search, header, listBox);
+  render(); updateCounter();
+  return { node, getValues: () => [...sel] };
+}
+
 // Sửa danh sách app phụ trách của 1 UA/PO ngay trong tab Danh sách UA/PO
 function openUserAppsDialog(user, apps) {
   const key = user.role === 'ua' ? 'uas' : 'pos';
-  const items = (apps || []).map(a => ({ id: a.id, full_name: a.code + ' - ' + a.name }));
+  const items = (apps || []).map(a => ({ id: a.id, label: a.code + ' - ' + a.name }));
   const cur = (apps || []).filter(a => (a[key] || []).some(x => Number(x.id) === Number(user.id))).map(a => a.id);
-  const pick = multiCheck(items, cur);
+  const pick = appChecklist(items, cur);
   const body = el('div', {},
-    el('p', { class: 'hint', style: 'margin-bottom:10px' }, 'Chọn các app mà ' + user.full_name + ' (' + user.role.toUpperCase() + ') phụ trách. Bỏ tick để gỡ.'),
-    el('div', { class: 'field' }, el('label', {}, 'App phụ trách'), pick.node),
+    el('p', { class: 'hint', style: 'margin-bottom:6px' }, 'Tick các app mà ' + user.full_name + ' (' + user.role.toUpperCase() + ') phụ trách. Bỏ tick để gỡ.'),
+    pick.node,
   );
   const save = async () => {
     try {
@@ -1340,7 +1369,7 @@ function openUserAppsDialog(user, apps) {
       toast('Đã cập nhật app phụ trách'); closeM(); route();
     } catch (e) { toast(e.message, 'err'); }
   };
-  const closeM = openModal({ title: 'Sửa app phụ trách: ' + user.full_name, body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '💾 Lưu')] });
+  const closeM = openModal({ title: 'Sửa app phụ trách: ' + user.full_name, body, wide: true, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '💾 Lưu')] });
 }
 
 function openUserForm(u, presetRole) {

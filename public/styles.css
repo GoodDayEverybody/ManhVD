@@ -180,6 +180,9 @@ textarea { resize: vertical; min-height: 70px; }
 .combo-opt:hover { background: var(--primary-light); }
 .combo-opt.sel { background: var(--primary); color: #fff; }
 .combo-empty { padding: 10px; color: var(--muted); font-size: 13px; text-align: center; }
+/* Bảng tick chọn app (luôn hiện) trong dialog Sửa app phụ trách */
+.checklist-box { border: 1px solid var(--border); border-radius: 10px; padding: 6px; max-height: 50vh; min-height: 180px; overflow-y: auto; background: #fff; }
+.checklist-box .combo-opt { font-size: 14px; padding: 9px 11px; }
 
 /* ---------- Filters ---------- */
 .filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: end; }
