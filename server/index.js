@@ -75,9 +75,8 @@ function todayStr() {
 // event: 'created' | 'submitted' | 'completed' | 'rework' | 'cancelled' | 'reassigned'
 function buildDiscordMessage(o, event) {
   const mention = (id) => (id ? ' <@' + id + '>' : '');
-  const appLabel = o.app_name || '—';
   const type = o.order_type_name || '';
-  const head = '`' + o.order_code + '` · **' + appLabel + '**' + (type ? ' · ' + type : '');
+  const head = '`' + o.order_code + '`' + (type ? ' · ' + type : '');
   if (event === 'created') {
     // Order cần Lead submit: tag Lead đúng loại vào duyệt & chọn người làm,
     // CHƯA tag người làm (vì khi submit Lead có thể giao cho người khác).
