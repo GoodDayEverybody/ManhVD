@@ -1261,21 +1261,29 @@ function openAppForm(a) {
 
 /* ============================ Users (admin) ============================ */
 
+let usersTab = 'all';   // 'all' | 'ua' | 'po'
 async function viewUsers(c) {
   setTitle('Quản lý User');
-  const users = await api('/users');
+  const [users, apps] = await Promise.all([api('/users'), api('/apps')]);
   c.innerHTML = '';
   c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Quản lý User'), el('span', { class: 'muted' }, '· ' + users.length + ' tài khoản'),
     el('span', { class: 'spacer' }), el('button', { class: 'btn primary', onclick: () => openUserForm(null) }, '➕ Thêm user')));
 
-  const roleLabel = roleBadge;
+  // Tabs: tất cả user / danh sách UA / danh sách PO (kèm app được giao)
+  const tabBtn = (k, label) => el('button', { class: usersTab === k ? 'active' : '', onclick: () => { usersTab = k; route(); } }, label);
+  c.appendChild(el('div', { class: 'tabs' }, tabBtn('all', 'Tất cả user'), tabBtn('ua', 'Danh sách UA'), tabBtn('po', 'Danh sách PO')));
 
+  if (usersTab === 'ua' || usersTab === 'po') renderAssigneeList(c, users, apps, usersTab);
+  else renderAllUsers(c, users);
+}
+
+function renderAllUsers(c, users) {
   const table = el('table', {},
     el('thead', {}, el('tr', {}, el('th', {}, 'Họ tên'), el('th', {}, 'Username'), el('th', {}, 'Vai trò'), el('th', {}, '2FA'), el('th', {}, 'Trạng thái'), el('th', {}, ''))),
     el('tbody', {}, users.map(u => el('tr', { style: u.active ? '' : 'opacity:.5' },
       el('td', {}, u.full_name),
       el('td', {}, el('code', {}, u.username)),
-      el('td', {}, roleLabel(u)),
+      el('td', {}, roleBadge(u)),
       el('td', {}, u.totp_enabled ? el('span', { class: 'badge green' }, '🔐 Bật') : el('span', { class: 'badge gray' }, 'Tắt')),
       el('td', {}, u.active ? el('span', { class: 'badge green' }, 'Hoạt động') : el('span', { class: 'badge gray' }, 'Đã khóa')),
       el('td', { class: 'nowrap' },
@@ -1283,6 +1291,34 @@ async function viewUsers(c) {
         u.totp_enabled ? el('button', { class: 'btn sm', title: 'Reset 2FA (mất điện thoại)', style: 'margin-left:6px', onclick: () => confirmDialog('Reset (tắt) 2FA của ' + u.full_name + '? Họ sẽ đăng nhập chỉ bằng mật khẩu cho tới khi bật lại.', async () => { await api('/users/' + u.id + '/reset-2fa', { method: 'POST' }); toast('Đã reset 2FA'); route(); }) }, '🔓 Reset 2FA') : null,
       ),
     ))),
+  );
+  c.appendChild(el('div', { class: 'table-wrap' }, table));
+}
+
+// Danh sách UA/PO kèm các app đang được giao phụ trách
+function renderAssigneeList(c, users, apps, role) {
+  const key = role === 'ua' ? 'uas' : 'pos';
+  const byUser = {};   // userId -> [app, ...]
+  (apps || []).forEach(a => (a[key] || []).forEach(x => { (byUser[x.id] = byUser[x.id] || []).push(a); }));
+  const list = users.filter(u => u.role === role && u.active);
+
+  if (!list.length) { c.appendChild(el('p', { class: 'muted', style: 'padding:14px' }, 'Chưa có ' + role.toUpperCase() + ' nào.')); return; }
+
+  const table = el('table', {},
+    el('thead', {}, el('tr', {}, el('th', {}, 'Họ tên'), el('th', {}, 'Username'), el('th', {}, 'Số app'), el('th', {}, 'App được giao phụ trách'))),
+    el('tbody', {}, list.map(u => {
+      const myApps = (byUser[u.id] || []).slice().sort((a, b) => (a.code || '').localeCompare(b.code || ''));
+      const appsCell = myApps.length
+        ? el('div', { style: 'display:flex; flex-wrap:wrap; gap:6px' },
+            myApps.map(a => el('span', { class: 'badge indigo', title: a.code + ' - ' + a.name }, a.code + ' - ' + a.name)))
+        : el('span', { class: 'muted' }, '— Chưa được giao app nào —');
+      return el('tr', {},
+        el('td', { class: 'nowrap' }, u.full_name),
+        el('td', {}, el('code', {}, u.username)),
+        el('td', {}, String(myApps.length)),
+        el('td', {}, appsCell),
+      );
+    })),
   );
   c.appendChild(el('div', { class: 'table-wrap' }, table));
 }
