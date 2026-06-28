@@ -75,7 +75,7 @@ function todayStr() {
 // event: 'created' | 'submitted' | 'completed' | 'rework' | 'cancelled' | 'reassigned'
 function buildDiscordMessage(o, event) {
   const mention = (id) => (id ? ' <@' + id + '>' : '');
-  const appLabel = o.app_code || o.app_name || '—';
+  const appLabel = o.app_name || '—';
   const type = o.order_type_name || '';
   const head = '`' + o.order_code + '` · **' + appLabel + '**' + (type ? ' · ' + type : '');
   if (event === 'created') {
