@@ -878,7 +878,7 @@ function openReassignDialog(o) {
       .filter(u => u.editor_type === 'video' || u.editor_type === 'video_lead')
       .map(u => el('option', { value: u.id, selected: o.editor_id === u.id }, u.full_name + ' (' + editorTypeLabel(u.editor_type) + ')')));
   const body = el('div', {},
-    el('p', { class: 'hint', style: 'margin-bottom:10px' }, 'Đổi người thực hiện order (vd: người được giao ban đầu đang bận). Trạng thái order giữ nguyên, người mới sẽ nhận được order này.'),
+    el('p', { class: 'hint', style: 'margin-bottom:10px' }, 'Đổi người thực hiện order (vd: người được giao ban đầu đang bận). Order sẽ chuyển về "Chờ làm" để người mới bắt đầu lại từ đầu.'),
     el('div', { class: 'field' }, el('label', {}, 'Người làm hiện tại'), el('div', { class: 'hint', style: 'margin:0' }, o.editor_name || '—')),
     el('div', { class: 'field' }, el('label', {}, 'Đổi sang'), editorSel),
   );
@@ -886,7 +886,7 @@ function openReassignDialog(o) {
     if (!editorSel.value) return toast('Vui lòng chọn người làm', 'err');
     if (Number(editorSel.value) === o.editor_id) return toast('Đây vẫn là người đang được giao', 'err');
     try {
-      await api('/orders/' + o.id, { method: 'PUT', body: { editor_id: Number(editorSel.value) } });
+      await api('/orders/' + o.id, { method: 'PUT', body: { editor_id: Number(editorSel.value), status: 'Chờ làm' } });
       toast('Đã đổi người làm'); closeM(); route();
     } catch (e) { toast(e.message, 'err'); }
   };
