@@ -68,15 +68,29 @@ function todayStr() {
 }
 
 // ---- Thông báo Discord (webhook) ----------------------------------------
-// event: 'created' | 'completed' | 'rework' | 'cancelled' | 'reassigned'
+// event: 'created' | 'submitted' | 'completed' | 'rework' | 'cancelled' | 'reassigned'
 function buildDiscordMessage(o, event) {
   const mention = (id) => (id ? ' <@' + id + '>' : '');
   const appLabel = o.app_code || o.app_name || '—';
   const type = o.order_type_name || '';
   const head = '`' + o.order_code + '` · **' + appLabel + '**' + (type ? ' · ' + type : '');
   if (event === 'created') {
+    // Order video cần Lead submit: tag Lead vào duyệt & chọn người làm, CHƯA tag người làm
+    // (vì khi submit Lead có thể giao cho người khác).
+    if (o.category === 'video' && o.status === 'Đợi submit') {
+      const leads = db.prepare(
+        "SELECT discord_id FROM users WHERE role='editor' AND editor_type='video_lead' AND active=1 AND discord_id IS NOT NULL"
+      ).all();
+      const leadTags = leads.map(l => mention(l.discord_id)).join('');
+      return '🆕 **Order video mới — CẦN SUBMIT** ' + head +
+        '\nNgười order: ' + (o.ua_name || '—') + ' · Lead vào duyệt & chọn người làm rồi Submit' + leadTags;
+    }
     return '🆕 **Order mới** ' + head +
       '\nNgười order: ' + (o.ua_name || '—') + ' → Giao cho: ' + (o.editor_name || 'Chưa giao') + mention(o.editor_discord);
+  }
+  if (event === 'submitted') {
+    return '📩 **Order ĐÃ SUBMIT — bắt đầu làm** ' + head +
+      '\nNgười order: ' + (o.ua_name || '—') + ' → Giao cho: ' + (o.editor_name || '—') + mention(o.editor_discord);
   }
   if (event === 'completed') {
     return '✅ **Order HOÀN THÀNH** ' + head +
@@ -472,9 +486,12 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
     db.prepare(`UPDATE orders SET ${setSql} WHERE id = @id`).run({ ...upd, id: o.id });
   }
   const updated = getOrder(o.id);
+  // Lead submit order video: "Đợi submit" -> "Chờ làm". Lúc này mới tag người làm.
+  const justSubmitted = o.status === 'Đợi submit' && finalStatus === 'Chờ làm';
   // Báo Discord khi đổi trạng thái (chỉ khi thực sự chuyển sang trạng thái mới)
   if (finalStatus !== o.status) {
-    if (finalStatus === 'Hoàn thành') notifyDiscord(updated, 'completed');
+    if (justSubmitted) notifyDiscord(updated, 'submitted');
+    else if (finalStatus === 'Hoàn thành') notifyDiscord(updated, 'completed');
     else if (finalStatus === 'Yêu cầu sửa') notifyDiscord(updated, 'rework');
     else if (finalStatus === 'Hủy') notifyDiscord(updated, 'cancelled');
   }

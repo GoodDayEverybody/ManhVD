@@ -1441,7 +1441,8 @@ async function settingsDiscord(box) {
   box.appendChild(el('div', { class: 'card card-pad', style: 'max-width:680px' },
     el('h3', {}, '🤖 Thông báo qua Discord'),
     el('p', { class: 'hint', style: 'margin-bottom:12px' },
-      'Hệ thống sẽ tự nhắn vào kênh Discord khi: order mới tạo, hoàn thành, yêu cầu sửa, bị hủy. ' +
+      'Hệ thống sẽ tự nhắn vào kênh Discord khi: order mới tạo, Lead submit, đổi người làm, hoàn thành, yêu cầu sửa, bị hủy. ' +
+      'Order video mới sẽ @tag Lead vào submit; submit xong mới @tag người làm. ' +
       'Muốn @tag đích danh ai thì điền Discord ID cho người đó ở mục Quản lý User.'),
     el('label', { class: 'size-check', style: 'margin-bottom:12px' }, enable, el('span', {}, 'Bật thông báo Discord')),
     el('div', { class: 'field' }, el('label', {}, 'Webhook URL'), urlInp),
