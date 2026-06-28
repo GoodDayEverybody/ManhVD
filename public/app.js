@@ -695,6 +695,7 @@ async function viewOrders(c, opts = {}) {
     { key: 'category', label: 'Loại', cls: '', val: o => o.category, cell: o => catPill(o.category) },
     { key: 'order_code', label: 'Mã', cls: '', val: o => o.order_code, cell: o => el('span', { class: 'code-cell' }, o.order_code) },
     { key: 'app_name', label: 'App', cls: '', val: o => (o.app_code || '') + (o.app_name || ''), cell: o => appLabel(o) },
+    { key: 'order_type_name', label: 'Loại order', cls: '', val: o => o.order_type_name || '', cell: o => el('span', { class: 'cell-ellipsis', title: o.order_type_name || '' }, o.order_type_name || '—') },
     showUA ? { key: 'ua_name', label: 'Người order', cls: '', val: o => o.ua_name || '', cell: o => o.ua_name || '—' } : null,
     { key: 'editor_name', label: 'Người làm', cls: '', val: o => o.editor_name || '', cell: o => o.editor_name ? el('span', {}, o.editor_name) : el('span', { class: 'badge amber' }, 'Chưa giao') },
     { key: 'status', label: 'Trạng thái', cls: '', val: o => o.status, cell: o => statusBadge(o.status) },
