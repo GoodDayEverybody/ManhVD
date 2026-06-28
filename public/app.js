@@ -1305,7 +1305,7 @@ function renderAssigneeList(c, users, apps, role) {
   if (!list.length) { c.appendChild(el('p', { class: 'muted', style: 'padding:14px' }, 'Chưa có ' + role.toUpperCase() + ' nào.')); return; }
 
   const table = el('table', {},
-    el('thead', {}, el('tr', {}, el('th', {}, 'Họ tên'), el('th', {}, 'Username'), el('th', {}, 'Số app'), el('th', {}, 'App được giao phụ trách'))),
+    el('thead', {}, el('tr', {}, el('th', {}, 'Họ tên'), el('th', {}, 'Username'), el('th', {}, 'Số app'), el('th', {}, 'App được giao phụ trách'), el('th', {}, ''))),
     el('tbody', {}, list.map(u => {
       const myApps = (byUser[u.id] || []).slice().sort((a, b) => (a.code || '').localeCompare(b.code || ''));
       const appsCell = myApps.length
@@ -1317,10 +1317,30 @@ function renderAssigneeList(c, users, apps, role) {
         el('td', {}, el('code', {}, u.username)),
         el('td', {}, String(myApps.length)),
         el('td', {}, appsCell),
+        el('td', { class: 'nowrap' }, el('button', { class: 'btn sm', onclick: () => openUserAppsDialog(u, apps) }, '✏️ Sửa app')),
       );
     })),
   );
   c.appendChild(el('div', { class: 'table-wrap' }, table));
+}
+
+// Sửa danh sách app phụ trách của 1 UA/PO ngay trong tab Danh sách UA/PO
+function openUserAppsDialog(user, apps) {
+  const key = user.role === 'ua' ? 'uas' : 'pos';
+  const items = (apps || []).map(a => ({ id: a.id, full_name: a.code + ' - ' + a.name }));
+  const cur = (apps || []).filter(a => (a[key] || []).some(x => Number(x.id) === Number(user.id))).map(a => a.id);
+  const pick = multiCheck(items, cur);
+  const body = el('div', {},
+    el('p', { class: 'hint', style: 'margin-bottom:10px' }, 'Chọn các app mà ' + user.full_name + ' (' + user.role.toUpperCase() + ') phụ trách. Bỏ tick để gỡ.'),
+    el('div', { class: 'field' }, el('label', {}, 'App phụ trách'), pick.node),
+  );
+  const save = async () => {
+    try {
+      await api('/users/' + user.id + '/apps', { method: 'PUT', body: { app_ids: pick.getValues() } });
+      toast('Đã cập nhật app phụ trách'); closeM(); route();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const closeM = openModal({ title: 'Sửa app phụ trách: ' + user.full_name, body, footer: [el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy'), el('button', { class: 'btn primary', onclick: save }, '💾 Lưu')] });
 }
 
 function openUserForm(u, presetRole) {

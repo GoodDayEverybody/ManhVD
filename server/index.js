@@ -585,6 +585,19 @@ app.delete('/api/users/:id', authenticate, requireRole('admin'), (req, res) => {
   res.json({ ok: true });
 });
 
+// Gán danh sách app cho 1 UA/PO (chiều ngược lại của setAppAssignees)
+app.put('/api/users/:id/apps', authenticate, requireRole('admin'), (req, res) => {
+  const u = db.prepare('SELECT id, role FROM users WHERE id = ?').get(req.params.id);
+  if (!u) return res.status(404).json({ error: 'Không tìm thấy user' });
+  if (u.role !== 'ua' && u.role !== 'po') return res.status(400).json({ error: 'Chỉ gán app cho UA/PO' });
+  const appIds = Array.isArray(req.body && req.body.app_ids) ? req.body.app_ids.map(Number) : [];
+  const validApps = new Set(db.prepare('SELECT id FROM apps').all().map(a => a.id));
+  db.prepare('DELETE FROM app_users WHERE user_id = ?').run(u.id);
+  const ins = db.prepare('INSERT OR IGNORE INTO app_users (app_id, user_id) VALUES (?, ?)');
+  appIds.forEach(aid => { if (validApps.has(aid)) ins.run(aid, u.id); });
+  res.json({ ok: true });
+});
+
 // ---- Cài đặt: Loại order (order_types) -----------------------------------
 
 app.get('/api/order_types', authenticate, (req, res) => {
