@@ -739,6 +739,8 @@ function renderOrderFilters(apps, managerFilters) {
   wrap.appendChild(el('div', { class: 'field', style: 'min-width:220px' }, el('label', {}, 'App'), appCombo.node));
   wrap.appendChild(fSelect('status', 'Trạng thái', [['', 'Tất cả'], ...meta.statuses.map(s => [s, s])], pending));
   wrap.appendChild(fSelect('category', 'Loại', [['', 'Tất cả'], ['image', 'Ảnh'], ['video', 'Video']], pending));
+  const typeOpts = [['', 'Tất cả'], ...(meta.orderTypes || []).map(t => [t.id, (t.category === 'video' ? '🎬 ' : '🖼️ ') + t.name])];
+  wrap.appendChild(fSelect('order_type_id', 'Loại order', typeOpts, pending));
   if (managerFilters) {
     wrap.appendChild(fSelect('ua_id', 'Người order', [['', 'Tất cả'], ...meta.uas.map(u => [u.id, u.full_name])], pending));
     wrap.appendChild(fSelect('editor_id', 'Người làm', [['', 'Tất cả'], ['none', '— Chưa giao —'], ...meta.editors.map(u => [u.id, u.full_name])], pending));

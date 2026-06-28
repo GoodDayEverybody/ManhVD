@@ -343,6 +343,7 @@ app.get('/api/orders', authenticate, (req, res) => {
     else { where.push('o.editor_id = ?'); params.push(q.editor_id); }
   }
   if (q.app_id) { where.push('o.app_id = ?'); params.push(q.app_id); }
+  if (q.order_type_id) { where.push('o.order_type_id = ?'); params.push(q.order_type_id); }
   if (q.status) { where.push('o.status = ?'); params.push(q.status); }
   if (q.category) { where.push('o.category = ?'); params.push(q.category); }
   if (q.from) { where.push('o.order_date >= ?'); params.push(q.from); }
