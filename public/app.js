@@ -89,18 +89,29 @@ function appLabel(o) {
 }
 // Nhãn loại editor
 function editorTypeLabel(t) {
-  return ({ graphic: 'Graphic Designer', video: 'Video Editor', video_lead: 'Video Editor Lead', uiux: 'UI/UX Designer', designer: 'Graphic Designer', both: 'Graphic+Video' })[t] || t || '';
+  return ({ graphic: 'Graphic Designer', graphic_lead: 'Graphic Designer Lead', video: 'Video Editor', video_lead: 'Video Editor Lead', uiux: 'UI/UX Designer', designer: 'Graphic Designer', both: 'Graphic+Video' })[t] || t || '';
 }
 // Vai trò "người order" (tạo + xem order của mình)
 const ORDERER_ROLES = ['ua', 'aso', 'po', 'hr'];
 const isOrdererRole = (r) => ORDERER_ROLES.includes(r);
-const isLeadUser = (u) => u && u.role === 'editor' && u.editor_type === 'video_lead';
+// Mỗi loại Lead phụ trách một loại order
+const LEAD_CATEGORY = { video_lead: 'video', graphic_lead: 'image' };
+const isLeadUser = (u) => !!u && u.role === 'editor' && (u.editor_type === 'video_lead' || u.editor_type === 'graphic_lead');
+// Loại order Lead phụ trách ('video' | 'image' | null)
+const leadCategory = (u) => (u && u.role === 'editor') ? (LEAD_CATEGORY[u.editor_type] || null) : null;
+// Danh sách người làm phù hợp với loại order (video -> video/lead; ảnh -> graphic/lead/uiux)
+function editorsForCategory(cat) {
+  const list = (State.meta && State.meta.editors) || [];
+  return cat === 'video'
+    ? list.filter(e => e.editor_type === 'video' || e.editor_type === 'video_lead')
+    : list.filter(e => e.editor_type === 'graphic' || e.editor_type === 'graphic_lead' || e.editor_type === 'uiux');
+}
 const SIMPLE_ROLE_LABEL = { ua: 'UA', aso: 'ASO', po: 'PO', hr: 'HR', admin: 'Admin' };
 // Badge vai trò có màu riêng cho dễ phân biệt
 function roleBadge(u) {
   const simple = { admin: 'red', ua: 'blue', aso: 'teal', po: 'indigo', hr: 'pink' };
   if (simple[u.role]) return el('span', { class: 'badge ' + simple[u.role] }, SIMPLE_ROLE_LABEL[u.role] || u.role);
-  const map = { graphic: 'green', video: 'amber', video_lead: 'orange', uiux: 'purple' };
+  const map = { graphic: 'green', graphic_lead: 'teal', video: 'amber', video_lead: 'orange', uiux: 'purple' };
   return el('span', { class: 'badge ' + (map[u.editor_type] || 'green') }, editorTypeLabel(u.editor_type));
 }
 // Các vai trò user, mã hóa role[:editor_type]
@@ -110,6 +121,7 @@ const USER_ROLES = [
   ['po', 'PO'],
   ['hr', 'HR'],
   ['editor:graphic', 'Graphic Designer'],
+  ['editor:graphic_lead', 'Graphic Designer Lead'],
   ['editor:video', 'Video Editor'],
   ['editor:video_lead', 'Video Editor Lead'],
   ['editor:uiux', 'UI/UX Designer'],
@@ -118,7 +130,7 @@ const USER_ROLES = [
 function userRoleValue(u) {
   if (!u) return 'ua';
   if (u.role === 'editor') {
-    const t = ['graphic', 'video', 'video_lead', 'uiux'].includes(u.editor_type) ? u.editor_type : 'graphic';
+    const t = ['graphic', 'graphic_lead', 'video', 'video_lead', 'uiux'].includes(u.editor_type) ? u.editor_type : 'graphic';
     return 'editor:' + t;
   }
   return u.role;
@@ -428,7 +440,7 @@ async function dashboardLead(c) {
   const { from, to } = computeRange(dashRange);
   const orders = await api('/orders?from=' + from + '&to=' + to);
   c.innerHTML = '';
-  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name), el('span', { class: 'muted' }, '· Team Creatives')));
+  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Xin chào, ' + State.user.full_name), el('span', { class: 'muted' }, '· Team ' + (leadCategory(State.user) === 'video' ? 'Video' : 'Ảnh'))));
   c.appendChild(dashControls());
   const cnt = (s) => orders.filter(o => o.status === s).length;
   const myPoints = orders.filter(o => o.editor_id === State.user.id).reduce((s, o) => s + (o.points || 0), 0);
@@ -798,13 +810,15 @@ async function openOrderDetail(id) {
   });
 
   const isLead = isLeadUser(State.user);
+  // Lead chỉ quản lý order đúng loại mình phụ trách; Admin quản lý mọi loại
+  const canManageThis = role === 'admin' || (isLead && o.category === leadCategory(State.user));
   const footer = [];
-  // Lead/Admin: giao việc & submit khi order đang "Đợi submit"
-  if ((isLead || role === 'admin') && o.status === 'Đợi submit') {
+  // Lead (đúng loại)/Admin: giao việc & submit khi order đang "Đợi submit"
+  if (canManageThis && o.status === 'Đợi submit') {
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openSubmitDialog(o); } }, '✅ Giao việc & Submit'));
   }
-  // Lead/Admin: đổi người làm sau khi đã submit (vd người được giao ban đầu đang bận)
-  if ((isLead || role === 'admin') && o.category === 'video' && ['Chờ làm', 'Đang làm', 'Yêu cầu sửa'].includes(o.status)) {
+  // Lead (đúng loại)/Admin: đổi người làm sau khi đã submit (vd người được giao ban đầu đang bận)
+  if (canManageThis && ['Chờ làm', 'Đang làm', 'Yêu cầu sửa'].includes(o.status)) {
     footer.push(el('button', { class: 'btn', onclick: () => { closeM(); openReassignDialog(o); } }, '🔄 Đổi người làm'));
   }
   if (role === 'editor' && o.editor_id === State.user.id && o.status !== 'Đợi submit') footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openEditorUpdate(o); } }, '✏️ Cập nhật tiến độ'));
@@ -851,10 +865,9 @@ function openEditorUpdate(o) {
 
 /* ---- Lead/Admin: giao việc & submit ---- */
 function openSubmitDialog(o) {
-  const meta = State.meta;
-  // chỉ cho chọn editor cùng loại creative (ảnh -> designer/uiux, video -> video/lead) + tất cả nếu muốn
+  // chỉ cho chọn người làm cùng loại creative (ảnh -> graphic/lead/uiux, video -> video/lead)
   const editorSel = el('select', {}, el('option', { value: '' }, '— Chọn người làm —'),
-    meta.editors.map(u => el('option', { value: u.id, selected: o.editor_id === u.id }, u.full_name + ' (' + editorTypeLabel(u.editor_type) + ')')));
+    editorsForCategory(o.category).map(u => el('option', { value: u.id, selected: o.editor_id === u.id }, u.full_name + ' (' + editorTypeLabel(u.editor_type) + ')')));
   const body = el('div', {},
     el('p', { class: 'hint', style: 'margin-bottom:10px' }, 'Chọn người thực hiện rồi bấm Submit. Sau khi submit, order chuyển sang "Chờ làm" và người được giao sẽ nhận được.'),
     el('div', { class: 'field' }, el('label', {}, 'Giao cho'), editorSel),
@@ -871,11 +884,9 @@ function openSubmitDialog(o) {
 
 /* ---- Lead/Admin: đổi người làm sau khi đã submit ---- */
 function openReassignDialog(o) {
-  const meta = State.meta;
-  // Order video -> chỉ chọn trong nhóm video / video lead
+  // Chọn người làm cùng loại order (video -> video/lead; ảnh -> graphic/lead/uiux)
   const editorSel = el('select', {}, el('option', { value: '' }, '— Chọn người làm —'),
-    meta.editors
-      .filter(u => u.editor_type === 'video' || u.editor_type === 'video_lead')
+    editorsForCategory(o.category)
       .map(u => el('option', { value: u.id, selected: o.editor_id === u.id }, u.full_name + ' (' + editorTypeLabel(u.editor_type) + ')')));
   const body = el('div', {},
     el('p', { class: 'hint', style: 'margin-bottom:10px' }, 'Đổi người thực hiện order (vd: người được giao ban đầu đang bận). Order sẽ chuyển về "Chờ làm" để người mới bắt đầu lại từ đầu.'),
@@ -1096,20 +1107,18 @@ async function buildOrderForm(container, order, inline, closeM) {
   const toggleYt = () => { ytField.style.display = cat.value === 'video' ? '' : 'none'; };
   toggleYt();
 
-  // Giao cho người làm (bắt buộc). Lọc theo loại: Video -> video editor/lead; Ảnh -> graphic/uiux
+  // Giao cho người làm (bắt buộc). Lọc theo loại: Video -> video/lead; Ảnh -> graphic/lead/uiux
   const editorSel = el('select', {});
   const fillAssign = () => {
     const cur = order ? order.editor_id : null;
-    const list = meta.editors.filter(e => cat.value === 'video'
-      ? (e.editor_type === 'video' || e.editor_type === 'video_lead')
-      : (e.editor_type === 'graphic' || e.editor_type === 'uiux'));
+    const list = editorsForCategory(cat.value);
     editorSel.innerHTML = '';
     editorSel.appendChild(el('option', { value: '' }, '— Chọn người làm —'));
     list.forEach(u => editorSel.appendChild(el('option', { value: u.id, selected: u.id === cur }, u.full_name + ' (' + editorTypeLabel(u.editor_type) + ')')));
   };
   fillAssign();
   const assignHint = el('div', { class: 'hint' }, '');
-  const updateAssignHint = () => { assignHint.textContent = cat.value === 'video' ? 'Order video sẽ chờ Lead duyệt & submit rồi mới chuyển cho người làm.' : 'Order ảnh sẽ được giao ngay cho người làm.'; };
+  const updateAssignHint = () => { assignHint.textContent = cat.value === 'video' ? 'Order video sẽ chờ Video Lead duyệt & submit rồi mới chuyển cho người làm.' : 'Order ảnh sẽ chờ Graphic Lead duyệt & submit rồi mới chuyển cho người làm.'; };
   updateAssignHint();
 
   const statusSel = el('select', {}, meta.statuses.map(s => el('option', { value: s, selected: order && order.status === s }, s)));

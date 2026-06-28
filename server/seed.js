@@ -78,6 +78,7 @@ const EDITORS = [
   { name: 'Khải', type: 'graphic' },
   { name: 'Hà', type: 'graphic' },
   { name: 'Quang', type: 'graphic' },
+  { name: 'Linh', type: 'graphic_lead' },
   { name: 'Cường', type: 'video' },
   { name: 'Hoàn', type: 'video' },
   { name: 'Khánh', type: 'video_lead' },
@@ -214,7 +215,7 @@ const OBJECTIVES_IMG = ['Ảnh quảng cáo', 'Localize Ảnh quảng cáo', 'Re
 const OBJECTIVES_VID = ['Video quảng cáo', 'Video cắt dựng', 'Resize + Thay outro', 'Localize Video'];
 
 const uaIdList = Object.values(uaIds);
-const designerIds = editorById.filter(e => e.type === 'graphic' || e.type === 'uiux').map(e => e.id);
+const designerIds = editorById.filter(e => e.type === 'graphic' || e.type === 'graphic_lead' || e.type === 'uiux').map(e => e.id);
 const videoEditorIds = editorById.filter(e => e.type === 'video' || e.type === 'video_lead').map(e => e.id);
 
 const seedOrders = (count) => tx(() => {
@@ -225,10 +226,10 @@ const seedOrders = (count) => tx(() => {
     const type = isVideo ? pick(videoTypeIds) : pick(imageTypeIds);
     const app = pick(appRows);
     const uaId = pick(uaIdList);
-    // Ảnh không có "Đợi submit"; Video có thể đang Đợi submit
+    // Cả Ảnh lẫn Video đều có thể đang "Đợi submit" (chờ Lead duyệt)
     const status = isVideo
       ? pick(['Đợi submit', 'Đợi submit', 'Chờ làm', 'Đang làm', 'Hoàn thành', 'Hoàn thành', 'Yêu cầu sửa'])
-      : pick(['Chờ làm', 'Đang làm', 'Hoàn thành', 'Hoàn thành', 'Yêu cầu sửa', 'Hủy']);
+      : pick(['Đợi submit', 'Chờ làm', 'Đang làm', 'Hoàn thành', 'Hoàn thành', 'Yêu cầu sửa', 'Hủy']);
     const orderDate = daysAgo(Math.floor(Math.random() * 45));
     const done = status === 'Hoàn thành';
     // Assign là bắt buộc -> luôn có người làm

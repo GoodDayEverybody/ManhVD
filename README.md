@@ -51,7 +51,9 @@ Mở trình duyệt vào địa chỉ: **http://localhost:3000**
 |--------|----------------|----------|
 | **Admin** | `admin` | `admin123` |
 | **UA** | `manhvd`, `baodx`, `thinhvq`, `trangntt`, `trinn`, `vynh`, `chaupm`, `phuctx`, `trangvtq`, `giangdtn`, `chinhdp`, `nguyennvh`, `thuyntt`, `hatt`, `hoan`, `thuybp`, `nguyen` | `123456` |
-| **Editor** | `khai`, `ha`, `quang`, `cuong`, `hoan2`, `khanh`, `phuongtrang` | `123456` |
+| **Editor** | `khai`, `ha`, `quang`, `linh`, `cuong`, `hoan2`, `khanh`, `phuongtrang` | `123456` |
+
+> Trong đó: `khanh` là **Video Editor Lead**, `linh` là **Graphic Designer Lead**.
 
 > Tên đăng nhập được sinh tự động từ tên nhân viên (bỏ dấu, viết thường, bỏ khoảng trắng).
 > Vì có cả UA tên "Hoan" và Editor tên "Hoàn" nên Editor dùng `hoan2`.
@@ -65,7 +67,10 @@ Mở trình duyệt vào địa chỉ: **http://localhost:3000**
 |--------|-------|
 | **Admin** | Xem & quản lý tất cả: order, app, user; giao việc cho Editor; xem mọi báo cáo |
 | **UA** | Tạo order, xem/sửa order của chính mình, yêu cầu sửa lại bản đã giao, xem hiệu suất bản thân |
+| **Lead** (Video / Graphic) | Phụ trách 1 loại order (Video Lead → order Video, Graphic Lead → order Ảnh): order mới phải qua Lead **duyệt & submit** (chọn người làm), được **đổi người làm** sau submit, xem báo cáo & order của loại mình |
 | **Editor** | Xem order được giao, cập nhật trạng thái (Chờ làm → Đang làm → Đã xong), gắn link Drive/Youtube, ghi note |
+
+> **Luồng order:** UA tạo order → order ở trạng thái **"Đợi submit"** → **Lead đúng loại** (Video Lead cho Video, Graphic Lead cho Ảnh) duyệt, chọn người làm rồi **Submit** → order chuyển **"Chờ làm"** cho người được giao.
 
 ---
 

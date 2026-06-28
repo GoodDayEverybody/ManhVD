@@ -27,7 +27,11 @@ const STATUSES = ['Đợi submit', 'Chờ làm', 'Đang làm', 'Hoàn thành', '
 const APP_STATUSES = ['Đang chạy', 'Đợi bàn giao', 'Dừng'];
 // Các vai trò "người order": tạo order + xem order của mình
 const ORDERER_ROLES = ['ua', 'aso', 'po', 'hr'];
-const isLeadUser = (u) => u.role === 'editor' && u.editor_type === 'video_lead';
+// Mỗi loại Lead phụ trách một loại order (category)
+const LEAD_CATEGORY = { video_lead: 'video', graphic_lead: 'image' };
+const isLeadUser = (u) => !!u && u.role === 'editor' && (u.editor_type === 'video_lead' || u.editor_type === 'graphic_lead');
+// Loại order mà Lead phụ trách ('video' | 'image' | null nếu không phải Lead)
+const leadCategory = (u) => (u && u.role === 'editor') ? (LEAD_CATEGORY[u.editor_type] || null) : null;
 
 // ---- Helpers -------------------------------------------------------------
 
@@ -75,14 +79,16 @@ function buildDiscordMessage(o, event) {
   const type = o.order_type_name || '';
   const head = '`' + o.order_code + '` · **' + appLabel + '**' + (type ? ' · ' + type : '');
   if (event === 'created') {
-    // Order video cần Lead submit: tag Lead vào duyệt & chọn người làm, CHƯA tag người làm
-    // (vì khi submit Lead có thể giao cho người khác).
-    if (o.category === 'video' && o.status === 'Đợi submit') {
+    // Order cần Lead submit: tag Lead đúng loại vào duyệt & chọn người làm,
+    // CHƯA tag người làm (vì khi submit Lead có thể giao cho người khác).
+    if (o.status === 'Đợi submit') {
+      const leadType = o.category === 'video' ? 'video_lead' : 'graphic_lead';
+      const kind = o.category === 'video' ? 'video' : 'ảnh';
       const leads = db.prepare(
-        "SELECT discord_id FROM users WHERE role='editor' AND editor_type='video_lead' AND active=1 AND discord_id IS NOT NULL"
-      ).all();
+        "SELECT discord_id FROM users WHERE role='editor' AND editor_type=? AND active=1 AND discord_id IS NOT NULL"
+      ).all(leadType);
       const leadTags = leads.map(l => mention(l.discord_id)).join('');
-      return '🆕 **Order video mới — CẦN SUBMIT** ' + head +
+      return '🆕 **Order ' + kind + ' mới — CẦN SUBMIT** ' + head +
         '\nNgười order: ' + (o.ua_name || '—') + ' · Lead vào duyệt & chọn người làm rồi Submit' + leadTags;
     }
     return '🆕 **Order mới** ' + head +
@@ -321,7 +327,11 @@ app.get('/api/orders', authenticate, (req, res) => {
     params.push(req.user.id);
   }
   else if (ORDERER_ROLES.includes(req.user.role)) { where.push('o.ua_id = ?'); params.push(req.user.id); }
-  else if (req.user.role === 'editor' && !isLeadUser(req.user)) {
+  else if (isLeadUser(req.user)) {
+    // Lead: chỉ order thuộc loại mình phụ trách (+ order mình tự được giao, phòng khác loại)
+    where.push('(o.category = ? OR o.editor_id = ?)'); params.push(leadCategory(req.user), req.user.id);
+  }
+  else if (req.user.role === 'editor') {
     // Editor thường: chỉ order được giao và đã submit
     where.push('o.editor_id = ? AND o.status != ?'); params.push(req.user.id, 'Đợi submit');
   }
@@ -395,8 +405,8 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'h
 
   const editorId = b.editor_id ? Number(b.editor_id) : null;
   if (!editorId) return res.status(400).json({ error: 'Vui lòng chọn người làm khi tạo order' });
-  // Ảnh: giao luôn (Chờ làm). Video: cần Lead submit (Đợi submit)
-  const initStatus = category === 'video' ? 'Đợi submit' : 'Chờ làm';
+  // Cả Ảnh lẫn Video đều cần Lead (đúng loại) duyệt & submit trước khi giao
+  const initStatus = 'Đợi submit';
   const code = nextOrderCode(label);
 
   const needYoutube = (category === 'video' && b.need_youtube) ? 1 : 0;
@@ -421,10 +431,12 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
   const role = req.user.role;
   const isOrderer = ORDERER_ROLES.includes(role);
   const isLead = isLeadUser(req.user);
+  // Lead chỉ "quản lý" (assign/submit) order đúng loại mình phụ trách
+  const leadManages = isLead && o.category === leadCategory(req.user);
 
   // Quyền
   if (isOrderer && o.ua_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
-  if (role === 'editor' && !isLead && o.editor_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
+  if (role === 'editor' && !leadManages && o.editor_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
 
   const upd = {};
 
@@ -441,12 +453,12 @@ app.put('/api/orders/:id', authenticate, (req, res) => {
     for (const f of fields) if (f in b) upd[f] = b[f];
     if (b.status === 'Yêu cầu sửa') upd.status = 'Yêu cầu sửa';
     if (b.status === 'Hủy') upd.status = 'Hủy';
-  } else if (isLead) {
-    // Lead: chỉ được assign người làm + submit (không sửa nội dung order)
+  } else if (leadManages) {
+    // Lead (đúng loại): được assign người làm + submit (không sửa nội dung order)
     const fields = ['editor_id', 'status', 'drive_link', 'youtube_link', 'note'];
     for (const f of fields) if (f in b) upd[f] = b[f];
   } else if (role === 'editor') {
-    // Editor cập nhật tiến độ & output
+    // Editor (kể cả Lead khi tự làm order được giao): cập nhật tiến độ & output
     const fields = ['status', 'drive_link', 'youtube_link', 'note'];
     for (const f of fields) if (f in b) upd[f] = b[f];
   }
@@ -684,7 +696,8 @@ function parseRoleLabel(label) {
     'ua': ['ua', null], 'aso': ['aso', null], 'po': ['po', null], 'hr': ['hr', null], 'admin': ['admin', null],
     'graphic designer': ['editor', 'graphic'], 'graphic': ['editor', 'graphic'], 'designer': ['editor', 'graphic'],
     'video editor': ['editor', 'video'], 'video': ['editor', 'video'],
-    'video editor lead': ['editor', 'video_lead'], 'lead': ['editor', 'video_lead'],
+    'video editor lead': ['editor', 'video_lead'], 'video lead': ['editor', 'video_lead'], 'lead': ['editor', 'video_lead'],
+    'graphic designer lead': ['editor', 'graphic_lead'], 'graphic lead': ['editor', 'graphic_lead'],
     'ui/ux designer': ['editor', 'uiux'], 'ui ux designer': ['editor', 'uiux'], 'uiux': ['editor', 'uiux'], 'ui/ux': ['editor', 'uiux'],
   };
   return map[t] || null;
