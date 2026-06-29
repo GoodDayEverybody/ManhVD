@@ -334,6 +334,7 @@ const NAV = {
   admin: [
     ['#/dashboard', '📊', 'Tổng quan'],
     ['#/orders', '📋', 'Quản lý Order'],
+    ['#/drafts', '📝', 'Nháp'],
     ['#/apps', '📱', 'Quản lý App'],
     ['#/users', '👥', 'Quản lý User'],
     ['#/reports', '📈', 'Báo cáo'],
@@ -1314,7 +1315,8 @@ async function buildOrderForm(container, order, inline, closeM, opts = {}) {
     } catch (e) { toast(e.message, 'err'); }
   };
 
-  const showDraftBtn = !isEdit && isOrdererRole(role);
+  // Mọi nơi tạo order đều có thể Lưu nháp (người order + admin), trừ khi đang sửa order thật
+  const showDraftBtn = !isEdit && (isOrdererRole(role) || role === 'admin');
   const actions = el('div', { style: 'display:flex; gap:10px; justify-content:flex-end; margin-top:8px;' },
     closeM ? el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy') : el('a', { class: 'btn', href: '#/orders' }, 'Hủy'),
     showDraftBtn ? el('button', { class: 'btn', onclick: saveDraft }, '📝 Lưu nháp') : null,

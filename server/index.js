@@ -320,13 +320,12 @@ app.get('/api/orders', authenticate, (req, res) => {
   const params = [];
 
   // Giới hạn theo role
-  let seesOwnDrafts = false;   // chỉ chính người tạo mới thấy order "Nháp" của mình
   if (req.query.managed === '1' && (req.user.role === 'ua' || req.user.role === 'po')) {
     // UA/PO: xem mọi order (kể cả người khác tạo) của app mình được giao phụ trách
     where.push('o.app_id IN (SELECT app_id FROM app_users WHERE user_id = ?)');
     params.push(req.user.id);
   }
-  else if (ORDERER_ROLES.includes(req.user.role)) { where.push('o.ua_id = ?'); params.push(req.user.id); seesOwnDrafts = true; }
+  else if (ORDERER_ROLES.includes(req.user.role)) { where.push('o.ua_id = ?'); params.push(req.user.id); }
   else if (isLeadUser(req.user)) {
     // Lead: chỉ order thuộc loại mình phụ trách (+ order mình tự được giao, phòng khác loại)
     where.push('(o.category = ? OR o.editor_id = ?)'); params.push(leadCategory(req.user), req.user.id);
@@ -335,9 +334,9 @@ app.get('/api/orders', authenticate, (req, res) => {
     // Editor thường: chỉ order được giao và đã submit
     where.push('o.editor_id = ? AND o.status != ?'); params.push(req.user.id, 'Đợi submit');
   }
-  // admin & Lead: xem tất cả order (trừ Nháp)
-  // Nháp là riêng tư của người tạo: ẩn với mọi người khác (admin/Lead/Editor/quản lý app)
-  if (!seesOwnDrafts) { where.push("o.status != 'Nháp'"); }
+  // admin & Lead: xem tất cả order
+  // Nháp là riêng tư của người tạo: chỉ chính người tạo thấy nháp của mình (kể cả admin)
+  where.push("(o.status != 'Nháp' OR o.ua_id = ?)"); params.push(req.user.id);
 
   const q = req.query;
   if (q.ua_id) { where.push('o.ua_id = ?'); params.push(q.ua_id); }
@@ -365,11 +364,8 @@ app.get('/api/orders', authenticate, (req, res) => {
 app.get('/api/orders/:id', authenticate, (req, res) => {
   const o = getOrder(req.params.id);
   if (!o) return res.status(404).json({ error: 'Không tìm thấy order' });
-  // Nháp chỉ người tạo (hoặc admin) được xem
-  if (o.status === 'Nháp') {
-    const isOwner = ORDERER_ROLES.includes(req.user.role) && o.ua_id === req.user.id;
-    if (!(isOwner || req.user.role === 'admin')) return res.status(403).json({ error: 'Không có quyền' });
-  }
+  // Nháp riêng tư: chỉ chính người tạo được xem (kể cả admin cũng không xem nháp người khác)
+  if (o.status === 'Nháp' && o.ua_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
   if (ORDERER_ROLES.includes(req.user.role) && o.ua_id !== req.user.id) {
     // UA/PO được xem order của người khác nếu là app mình phụ trách
     let ok = false;
@@ -557,8 +553,13 @@ app.patch('/api/orders/:id/assign', authenticate, requireRole('admin'), (req, re
 app.delete('/api/orders/:id', authenticate, (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!o) return res.status(404).json({ error: 'Không tìm thấy order' });
-  const isOwnerDraft = o.status === 'Nháp' && ORDERER_ROLES.includes(req.user.role) && o.ua_id === req.user.id;
-  if (req.user.role !== 'admin' && !isOwnerDraft) return res.status(403).json({ error: 'Không có quyền' });
+  if (o.status === 'Nháp') {
+    // Nháp: chỉ người tạo được xóa
+    if (o.ua_id !== req.user.id) return res.status(403).json({ error: 'Không có quyền' });
+  } else if (req.user.role !== 'admin') {
+    // Order thật: chỉ admin
+    return res.status(403).json({ error: 'Không có quyền' });
+  }
   db.prepare('DELETE FROM orders WHERE id = ?').run(o.id);
   res.json({ ok: true });
 });
