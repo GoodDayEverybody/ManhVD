@@ -184,6 +184,20 @@ textarea { resize: vertical; min-height: 70px; }
 .checklist-box { border: 1px solid var(--border); border-radius: 10px; padding: 6px; max-height: 50vh; min-height: 180px; overflow-y: auto; background: #fff; }
 .checklist-box .combo-opt { font-size: 14px; padding: 9px 11px; }
 
+/* ---------- Rich text editor (mô tả) ---------- */
+.rte { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; background: #fff; }
+.rte-toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 6px; border-bottom: 1px solid var(--border); background: #f8fafc; }
+.rte-btn { min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; line-height: 1; color: var(--text); }
+.rte-btn:hover { background: var(--primary-light); }
+.rte-color { width: 20px; height: 20px; border: 1px solid rgba(0,0,0,.15); border-radius: 50%; cursor: pointer; padding: 0; }
+.rte-color:hover { transform: scale(1.12); }
+.rte-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.rte-area { min-height: 120px; max-height: 320px; overflow-y: auto; padding: 10px 12px; font-size: 14px; line-height: 1.5; outline: none; }
+.rte-area:empty:before { content: attr(data-ph); color: #9ca3af; }
+/* Hiển thị mô tả đã định dạng ở chi tiết order */
+.rich-text { line-height: 1.5; }
+.rich-text :where(b, strong) { font-weight: 700; }
+
 /* ---------- Filters ---------- */
 .filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: end; }
 .filters .field { margin-bottom: 0; min-width: 140px; }

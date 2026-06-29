@@ -66,6 +66,67 @@ function fmtDate(s) { return s ? String(s).slice(0, 10).split('-').reverse().joi
 function fmtNum(n) { return (Math.round((n || 0) * 100) / 100).toLocaleString('vi-VN'); }
 function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
+/* ---- Rich text (mô tả): in đậm/nghiêng/gạch chân/đổi màu ---- */
+// Chỉ giữ các thẻ & style an toàn (chống XSS) khi lưu/hiển thị nội dung HTML
+const RTE_ALLOWED_TAGS = { B: 1, STRONG: 1, I: 1, EM: 1, U: 1, BR: 1, DIV: 1, P: 1, SPAN: 1, FONT: 1 };
+const RTE_ALLOWED_STYLE = ['color', 'background-color', 'font-weight', 'font-style', 'text-decoration'];
+function sanitizeStyle(css) {
+  return String(css || '').split(';').map(s => s.trim()).filter(Boolean).filter(s => {
+    const prop = s.split(':')[0].trim().toLowerCase();
+    const val = s.split(':').slice(1).join(':').toLowerCase();
+    if (!RTE_ALLOWED_STYLE.includes(prop)) return false;
+    if (/url\s*\(|expression|javascript:/i.test(val)) return false;
+    return true;
+  }).join('; ');
+}
+function sanitizeRichHtml(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = String(html == null ? '' : html);
+  const cleanChildren = (parent) => {
+    let child = parent.firstChild;
+    while (child) {
+      if (child.nodeType === 3) { child = child.nextSibling; continue; }       // text node: giữ
+      if (child.nodeType !== 1) { const r = child; child = child.nextSibling; r.remove(); continue; }
+      const tag = child.tagName;
+      if (!RTE_ALLOWED_TAGS[tag]) {                                            // thẻ lạ: bỏ thẻ, giữ nội dung
+        const first = child.firstChild;
+        while (child.firstChild) parent.insertBefore(child.firstChild, child);
+        const toRemove = child; child = first || child.nextSibling; toRemove.remove();
+        continue;
+      }
+      [...child.attributes].forEach(attr => {                                  // lọc thuộc tính
+        const name = attr.name.toLowerCase();
+        if (name === 'color' && tag === 'FONT') return;
+        if (name === 'style') { const safe = sanitizeStyle(attr.value); if (safe) child.setAttribute('style', safe); else child.removeAttribute('style'); return; }
+        child.removeAttribute(attr.name);
+      });
+      cleanChildren(child);
+      child = child.nextSibling;
+    }
+  };
+  cleanChildren(tpl.content);
+  return tpl.innerHTML;
+}
+// Trình soạn thảo nhỏ: trả về { node, getHTML }
+function richEditor(initialHtml, placeholder) {
+  const area = el('div', { class: 'rte-area', contenteditable: 'true', 'data-ph': placeholder || '' });
+  area.innerHTML = sanitizeRichHtml(initialHtml || '');
+  const exec = (cmd, val) => { area.focus(); document.execCommand(cmd, false, val || null); };
+  const btn = (label, cmd, title, style) => el('button', { type: 'button', class: 'rte-btn', title, style: style || '', onmousedown: (e) => { e.preventDefault(); exec(cmd); } }, label);
+  const colors = ['#e11d48', '#ea580c', '#16a34a', '#2563eb', '#7c3aed', '#111827'];
+  const colorBtns = colors.map(col => el('button', { type: 'button', class: 'rte-color', title: 'Màu chữ', style: 'background:' + col, onmousedown: (e) => { e.preventDefault(); exec('foreColor', col); } }));
+  const toolbar = el('div', { class: 'rte-toolbar' },
+    btn('B', 'bold', 'In đậm', 'font-weight:800'),
+    btn('I', 'italic', 'In nghiêng', 'font-style:italic'),
+    btn('U', 'underline', 'Gạch chân', 'text-decoration:underline'),
+    el('span', { class: 'rte-sep' }),
+    ...colorBtns,
+    el('span', { class: 'rte-sep' }),
+    el('button', { type: 'button', class: 'rte-btn', title: 'Xóa định dạng', onmousedown: (e) => { e.preventDefault(); exec('removeFormat'); } }, '✕ Định dạng'),
+  );
+  return { node: el('div', { class: 'rte' }, toolbar, area), getHTML: () => sanitizeRichHtml(area.innerHTML) };
+}
+
 function statusBadge(s) {
   const map = { 'Đợi submit': 'amber', 'Chờ làm': 'gray', 'Đang làm': 'blue', 'Hoàn thành': 'green', 'Đã xong': 'green', 'Yêu cầu sửa': 'red', 'Hủy': 'darkred' };
   return el('span', { class: 'badge ' + (map[s] || 'gray') }, s);
@@ -796,7 +857,7 @@ async function openOrderDetail(id) {
   add('Trạng thái', statusBadge(o.status));
   add('Điểm', fmtNum(o.points));
   if (o.completed_at) add('Hoàn thành', fmtDate(o.completed_at));
-  add('Mô tả chi tiết', o.description);
+  add('Mô tả chi tiết', o.description ? el('div', { class: 'rich-text', html: sanitizeRichHtml(o.description) }) : '');
   if (o.note_request) add('Lưu ý (UA)', o.note_request);
   if (o.ref_link) add('Ref link', el('a', { href: o.ref_link, target: '_blank' }, o.ref_link));
   if (o.app_link) add('Link App', el('a', { href: o.app_link, target: '_blank' }, o.app_link));
@@ -1043,7 +1104,7 @@ async function buildOrderForm(container, order, inline, closeM) {
   const orderDateDefault = order ? (order.order_date || '').slice(0, 10) : todayLocal();
   const orderDateDisplay = el('input', { type: 'text', value: fmtDate(orderDateDefault), disabled: true });
 
-  const desc = el('textarea', { placeholder: 'Mô tả chi tiết yêu cầu...' }, order ? order.description || '' : '');
+  const desc = richEditor(order ? order.description || '' : '', 'Mô tả chi tiết yêu cầu... (bôi đen chữ rồi bấm B/I/U hoặc chọn màu để nhấn mạnh)');
   const ref = el('textarea', { placeholder: 'Dán một hoặc nhiều link (mỗi link một dòng)...', style: 'min-height:100px' }, order ? order.ref_link || '' : '');
   const noteReq = el('input', { value: order ? order.note_request || '' : '', placeholder: 'Lưu ý cho editor' });
 
@@ -1136,7 +1197,7 @@ async function buildOrderForm(container, order, inline, closeM) {
     ),
     el('div', { class: 'field' }, el('label', {}, 'App ', el('span', { class: 'req' }, '*')), appCombo.node, appHint),
     el('div', { class: 'field' }, el('label', {}, 'Order date'), orderDateDisplay),
-    el('div', { class: 'field' }, el('label', {}, 'Mô tả chi tiết'), desc),
+    el('div', { class: 'field' }, el('label', {}, 'Mô tả chi tiết'), desc.node),
     el('div', { class: 'field' }, el('label', {}, 'Kích thước'), sizeBox),
     ytField,
     el('div', { class: 'field' }, el('label', {}, 'Ref link'), ref),
@@ -1156,7 +1217,7 @@ async function buildOrderForm(container, order, inline, closeM) {
       category: cat.value, order_type_id: Number(typeSel.value),
       app_id: Number(appId),
       app_name: (appList.find(a => a.id === Number(appId)) || {}).name || '',
-      order_date: orderDateDefault, description: desc.value,
+      order_date: orderDateDefault, description: desc.getHTML(),
       ref_link: ref.value, size: collectSizes(), note_request: noteReq.value,
       need_youtube: (cat.value === 'video' && needYoutube.checked) ? 1 : 0,
       editor_id: Number(editorSel.value),
