@@ -531,6 +531,40 @@ app.delete('/api/orders/:id', authenticate, requireRole('admin'), (req, res) => 
   res.json({ ok: true });
 });
 
+// ---- Bản nháp order (Lưu nháp) -------------------------------------------
+// Nháp là dữ liệu form lưu tạm, riêng tư theo người order; chốt = tạo order thật rồi xóa nháp.
+const canDraft = (u) => ORDERER_ROLES.includes(u.role) || u.role === 'admin';
+
+app.get('/api/order_drafts', authenticate, (req, res) => {
+  if (!canDraft(req.user)) return res.json([]);
+  const rows = db.prepare('SELECT id, data, updated_at FROM order_drafts WHERE ua_id = ? ORDER BY updated_at DESC').all(req.user.id);
+  res.json(rows.map(r => { let data = {}; try { data = JSON.parse(r.data); } catch (e) {} return { id: r.id, updated_at: r.updated_at, data }; }));
+});
+
+app.post('/api/order_drafts', authenticate, (req, res) => {
+  if (!canDraft(req.user)) return res.status(403).json({ error: 'Không có quyền' });
+  const data = JSON.stringify((req.body && req.body.data) || {});
+  const r = db.prepare('INSERT INTO order_drafts (ua_id, data) VALUES (?, ?)').run(req.user.id, data);
+  res.json({ id: r.lastInsertRowid });
+});
+
+app.put('/api/order_drafts/:id', authenticate, (req, res) => {
+  const d = db.prepare('SELECT * FROM order_drafts WHERE id = ?').get(req.params.id);
+  if (!d) return res.status(404).json({ error: 'Không tìm thấy nháp' });
+  if (d.ua_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Không có quyền' });
+  const data = JSON.stringify((req.body && req.body.data) || {});
+  db.prepare("UPDATE order_drafts SET data = ?, updated_at = datetime('now','localtime') WHERE id = ?").run(data, d.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/order_drafts/:id', authenticate, (req, res) => {
+  const d = db.prepare('SELECT * FROM order_drafts WHERE id = ?').get(req.params.id);
+  if (!d) return res.json({ ok: true });
+  if (d.ua_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Không có quyền' });
+  db.prepare('DELETE FROM order_drafts WHERE id = ?').run(d.id);
+  res.json({ ok: true });
+});
+
 // ---- Users (admin) -------------------------------------------------------
 
 app.get('/api/users', authenticate, requireRole('admin'), (req, res) => {

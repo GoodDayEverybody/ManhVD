@@ -348,6 +348,7 @@ const NAV = {
 const UA_PO_NAV = [
   ['#/dashboard', '📊', 'Tổng quan'],
   ['#/new', '➕', 'Tạo Order'],
+  ['#/drafts', '📝', 'Nháp'],
   ['#/orders', '📋', 'Order của tôi'],
   ['#/managed', '📂', 'Quản lý Order'],
 ];
@@ -357,6 +358,7 @@ NAV.po = UA_PO_NAV;
 const ORDERER_NAV = [
   ['#/dashboard', '📊', 'Tổng quan'],
   ['#/new', '➕', 'Tạo Order'],
+  ['#/drafts', '📝', 'Nháp'],
   ['#/orders', '📋', 'Order của tôi'],
 ];
 ['aso', 'hr'].forEach(r => { NAV[r] = ORDERER_NAV; });
@@ -413,6 +415,7 @@ const ROUTES = {
   assigned: (c) => viewOrders(c, { assignedToMe: true }),
   managed: (c) => viewOrders(c, { managed: true }),
   new: viewNewOrder,
+  drafts: viewDrafts,
   apps: viewApps,
   users: viewUsers,
   reports: viewReports,
@@ -895,6 +898,10 @@ async function openOrderDetail(id) {
     if (canCancel) footer.push(el('button', { class: 'btn danger', onclick: cancelOrder }, '🚫 Hủy order'));
     footer.push(el('button', { class: 'btn primary', onclick: () => { closeM(); openOrderForm(o); } }, '✏️ Sửa'));
   }
+  // Nhân bản: tạo order mới với dữ liệu giống order này (cho người order & admin)
+  if (isOrdererRole(role) || role === 'admin') {
+    footer.push(el('button', { class: 'btn', onclick: () => { closeM(); openOrderForm(o, { dup: true }); } }, '📄 Nhân bản'));
+  }
   footer.push(el('button', { class: 'btn', onclick: () => closeM() }, 'Đóng'));
 
   const closeM = openModal({ title: 'Chi tiết Order', body: dl, footer, wide: true });
@@ -979,10 +986,45 @@ async function viewNewOrder(c) {
   await buildOrderForm(card, null, true);
 }
 
-async function openOrderForm(order) {
+async function openOrderForm(order, opts = {}) {
   const body = el('div', {});
-  const closeM = openModal({ title: order ? 'Sửa Order ' + order.order_code : 'Tạo Order mới', body, wide: true });
-  await buildOrderForm(body, order, false, closeM);
+  const title = opts.dup ? 'Nhân bản Order' : opts.draftId ? 'Sửa nháp order' : order ? 'Sửa Order ' + order.order_code : 'Tạo Order mới';
+  const closeM = openModal({ title, body, wide: true });
+  await buildOrderForm(body, order, false, closeM, opts);
+}
+
+// Danh sách bản nháp của người order
+async function viewDrafts(c) {
+  setTitle('Bản nháp');
+  const drafts = await api('/order_drafts');
+  c.innerHTML = '';
+  c.appendChild(el('div', { class: 'page-head' }, el('h1', {}, 'Bản nháp'), el('span', { class: 'muted' }, '· ' + drafts.length + ' nháp'),
+    el('span', { class: 'spacer' }), el('a', { class: 'btn primary', href: '#/new' }, '➕ Tạo order mới')));
+
+  if (!drafts.length) { c.appendChild(el('p', { class: 'muted', style: 'padding:14px' }, 'Chưa có bản nháp nào. Khi tạo order, bấm "📝 Lưu nháp" để lưu tạm và chỉnh sửa dần.')); return; }
+
+  const typeName = (id) => { const t = (State.meta.orderTypes || []).find(x => x.id === Number(id)); return t ? t.name : '—'; };
+  const stripHtml = (h) => { const d = el('div', { html: sanitizeRichHtml(h || '') }); return (d.textContent || '').trim(); };
+
+  const table = el('table', {},
+    el('thead', {}, el('tr', {}, el('th', {}, 'Loại'), el('th', {}, 'App'), el('th', {}, 'Loại order'), el('th', {}, 'Mô tả'), el('th', {}, 'Cập nhật'), el('th', {}, ''))),
+    el('tbody', {}, drafts.map(d => {
+      const data = d.data || {};
+      const descText = stripHtml(data.description);
+      return el('tr', {},
+        el('td', {}, data.category ? catPill(data.category) : '—'),
+        el('td', {}, data.app_name || '—'),
+        el('td', {}, el('span', { class: 'cell-ellipsis', title: typeName(data.order_type_id) }, typeName(data.order_type_id))),
+        el('td', {}, el('span', { class: 'cell-ellipsis', title: descText }, descText || '—')),
+        el('td', { class: 'nowrap' }, fmtDate(d.updated_at)),
+        el('td', { class: 'nowrap' },
+          el('button', { class: 'btn sm primary', onclick: () => openOrderForm(data, { draftId: d.id }) }, '✏️ Tiếp tục'),
+          el('button', { class: 'btn sm danger', style: 'margin-left:6px', onclick: () => confirmDialog('Xóa bản nháp này?', async () => { await api('/order_drafts/' + d.id, { method: 'DELETE' }); toast('Đã xóa nháp'); route(); }) }, '🗑'),
+        ),
+      );
+    })),
+  );
+  c.appendChild(el('div', { class: 'table-wrap' }, table));
 }
 
 // Dropdown có ô tìm kiếm. items: [{value, label}]. Trả { node, getValue }
@@ -1061,14 +1103,18 @@ function makeCombo(items, selectedValue, placeholder, onChange) {
   return { node: wrap, getValue: () => value };
 }
 
-async function buildOrderForm(container, order, inline, closeM) {
+async function buildOrderForm(container, order, inline, closeM, opts = {}) {
   const meta = State.meta;
   const role = State.user.role;
   const isAdmin = role === 'admin';
+  const dup = !!opts.dup;                       // nhân bản: prefill nhưng tạo order MỚI
+  const draftId = opts.draftId || null;         // đang sửa tiếp 1 bản nháp
+  const asNew = dup || !!draftId;               // prefill nhưng hành xử như tạo mới
+  const isEdit = !!order && !asNew;             // sửa order thật đã có
   // Danh sách app có thể tạo order (đang chạy/đợi bàn giao; UA/PO chỉ thấy app được giao)
   const apps = await api('/apps?for_order=1');
-  const allApps = isAdmin && order ? await api('/apps') : apps;
-  const appList = (order ? allApps : apps);
+  const allApps = isAdmin && isEdit ? await api('/apps') : apps;
+  const appList = (isEdit ? allApps : apps);
 
   const cat = el('select', {}, el('option', { value: 'image' }, '🖼️ Ảnh'), el('option', { value: 'video' }, '🎬 Video'));
   cat.value = order ? order.category : 'image';
@@ -1100,8 +1146,8 @@ async function buildOrderForm(container, order, inline, closeM) {
     () => updateAppLink()
   );
 
-  // Order date = ngày tạo order, không cho chọn
-  const orderDateDefault = order ? (order.order_date || '').slice(0, 10) : todayLocal();
+  // Order date = ngày tạo order, không cho chọn (nhân bản/nháp dùng ngày hôm nay)
+  const orderDateDefault = isEdit ? (order.order_date || '').slice(0, 10) : todayLocal();
   const orderDateDisplay = el('input', { type: 'text', value: fmtDate(orderDateDefault), disabled: true });
 
   const desc = richEditor(order ? order.description || '' : '', 'Mô tả chi tiết yêu cầu... (bôi đen chữ rồi bấm B/I/U hoặc chọn màu để nhấn mạnh)');
@@ -1203,38 +1249,72 @@ async function buildOrderForm(container, order, inline, closeM) {
     el('div', { class: 'field' }, el('label', {}, 'Ref link'), ref),
     el('div', { class: 'field' }, el('label', {}, 'Lưu ý'), noteReq),
     el('div', { class: 'field' }, el('label', {}, 'Giao cho (người làm) ', el('span', { class: 'req' }, '*')), editorSel, assignHint),
-    isAdmin && order ? el('div', { class: 'field' }, el('label', {}, 'Trạng thái'), statusSel) : null,
+    isAdmin && isEdit ? el('div', { class: 'field' }, el('label', {}, 'Trạng thái'), statusSel) : null,
   ));
 
   updateAppLink();
 
-  const submit = async () => {
+  // Gom dữ liệu form (không kiểm tra bắt buộc — dùng cho cả nháp)
+  const collectBody = () => {
     const appId = appCombo.getValue();
-    if (!appId) return toast('Vui lòng chọn App', 'err');
-    if (!typeSel.value) return toast('Vui lòng chọn loại order', 'err');
-    if (!editorSel.value) return toast('Vui lòng chọn người làm', 'err');
-    const body = {
-      category: cat.value, order_type_id: Number(typeSel.value),
-      app_id: Number(appId),
+    return {
+      category: cat.value,
+      order_type_id: typeSel.value ? Number(typeSel.value) : null,
+      app_id: appId ? Number(appId) : null,
       app_name: (appList.find(a => a.id === Number(appId)) || {}).name || '',
       order_date: orderDateDefault, description: desc.getHTML(),
       ref_link: ref.value, size: collectSizes(), note_request: noteReq.value,
       need_youtube: (cat.value === 'video' && needYoutube.checked) ? 1 : 0,
-      editor_id: Number(editorSel.value),
+      editor_id: editorSel.value ? Number(editorSel.value) : null,
     };
-    if (isAdmin && order) body.status = statusSel.value;
+  };
+  const finishNav = () => { if (closeM) closeM(); if (inline) location.hash = '#/orders'; else route(); };
+
+  // Lưu nháp: lưu tạm, không cần điền đủ
+  const saveDraft = async () => {
+    const body = collectBody();
     try {
-      if (order) { await api('/orders/' + order.id, { method: 'PUT', body }); toast('Đã lưu thay đổi'); }
-      else { const r = await api('/orders', { method: 'POST', body }); toast('Đã tạo order ' + r.order_code); }
+      if (draftId) await api('/order_drafts/' + draftId, { method: 'PUT', body: { data: body } });
+      else await api('/order_drafts', { method: 'POST', body: { data: body } });
+      toast('Đã lưu nháp');
       if (closeM) closeM();
-      if (inline) location.hash = '#/orders';
-      else route();
+      location.hash = '#/drafts';
+      if (!inline && !closeM) route();
     } catch (e) { toast(e.message, 'err'); }
   };
 
+  // Chốt tạo order (mới / nhân bản / từ nháp): bắt buộc đủ thông tin
+  const createOrder = async () => {
+    const body = collectBody();
+    if (!body.app_id) return toast('Vui lòng chọn App', 'err');
+    if (!body.order_type_id) return toast('Vui lòng chọn loại order', 'err');
+    if (!body.editor_id) return toast('Vui lòng chọn người làm', 'err');
+    try {
+      const r = await api('/orders', { method: 'POST', body });
+      toast('Đã tạo order ' + r.order_code);
+      if (draftId) { try { await api('/order_drafts/' + draftId, { method: 'DELETE' }); } catch (e) {} }
+      finishNav();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  // Lưu thay đổi order thật đã có
+  const saveEdit = async () => {
+    const body = collectBody();
+    if (!body.app_id) return toast('Vui lòng chọn App', 'err');
+    if (!body.order_type_id) return toast('Vui lòng chọn loại order', 'err');
+    if (!body.editor_id) return toast('Vui lòng chọn người làm', 'err');
+    if (isAdmin) body.status = statusSel.value;
+    try {
+      await api('/orders/' + order.id, { method: 'PUT', body });
+      toast('Đã lưu thay đổi'); finishNav();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
+  const showDraftBtn = !isEdit && isOrdererRole(role);
   const actions = el('div', { style: 'display:flex; gap:10px; justify-content:flex-end; margin-top:8px;' },
     closeM ? el('button', { class: 'btn', onclick: () => closeM() }, 'Hủy') : el('a', { class: 'btn', href: '#/orders' }, 'Hủy'),
-    el('button', { class: 'btn primary', onclick: submit }, order ? '💾 Lưu' : '➕ Tạo order'),
+    showDraftBtn ? el('button', { class: 'btn', onclick: saveDraft }, '📝 Lưu nháp') : null,
+    el('button', { class: 'btn primary', onclick: isEdit ? saveEdit : createOrder }, isEdit ? '💾 Lưu' : '➕ Tạo order'),
   );
   container.appendChild(actions);
 }
