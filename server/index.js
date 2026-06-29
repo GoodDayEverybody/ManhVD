@@ -320,12 +320,13 @@ app.get('/api/orders', authenticate, (req, res) => {
   const params = [];
 
   // Giới hạn theo role
+  let seesOwnDrafts = false;   // chỉ chính người tạo mới thấy order "Nháp" của mình
   if (req.query.managed === '1' && (req.user.role === 'ua' || req.user.role === 'po')) {
     // UA/PO: xem mọi order (kể cả người khác tạo) của app mình được giao phụ trách
     where.push('o.app_id IN (SELECT app_id FROM app_users WHERE user_id = ?)');
     params.push(req.user.id);
   }
-  else if (ORDERER_ROLES.includes(req.user.role)) { where.push('o.ua_id = ?'); params.push(req.user.id); }
+  else if (ORDERER_ROLES.includes(req.user.role)) { where.push('o.ua_id = ?'); params.push(req.user.id); seesOwnDrafts = true; }
   else if (isLeadUser(req.user)) {
     // Lead: chỉ order thuộc loại mình phụ trách (+ order mình tự được giao, phòng khác loại)
     where.push('(o.category = ? OR o.editor_id = ?)'); params.push(leadCategory(req.user), req.user.id);
@@ -334,7 +335,9 @@ app.get('/api/orders', authenticate, (req, res) => {
     // Editor thường: chỉ order được giao và đã submit
     where.push('o.editor_id = ? AND o.status != ?'); params.push(req.user.id, 'Đợi submit');
   }
-  // admin & Lead: xem tất cả order
+  // admin & Lead: xem tất cả order (trừ Nháp)
+  // Nháp là riêng tư của người tạo: ẩn với mọi người khác (admin/Lead/Editor/quản lý app)
+  if (!seesOwnDrafts) { where.push("o.status != 'Nháp'"); }
 
   const q = req.query;
   if (q.ua_id) { where.push('o.ua_id = ?'); params.push(q.ua_id); }
@@ -362,6 +365,11 @@ app.get('/api/orders', authenticate, (req, res) => {
 app.get('/api/orders/:id', authenticate, (req, res) => {
   const o = getOrder(req.params.id);
   if (!o) return res.status(404).json({ error: 'Không tìm thấy order' });
+  // Nháp chỉ người tạo (hoặc admin) được xem
+  if (o.status === 'Nháp') {
+    const isOwner = ORDERER_ROLES.includes(req.user.role) && o.ua_id === req.user.id;
+    if (!(isOwner || req.user.role === 'admin')) return res.status(403).json({ error: 'Không có quyền' });
+  }
   if (ORDERER_ROLES.includes(req.user.role) && o.ua_id !== req.user.id) {
     // UA/PO được xem order của người khác nếu là app mình phụ trách
     let ok = false;
@@ -376,11 +384,12 @@ app.get('/api/orders/:id', authenticate, (req, res) => {
 
 app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'hr'), (req, res) => {
   const b = req.body || {};
+  const isDraft = !!b.draft;   // Lưu nháp: cho phép thiếu thông tin, chưa chốt
   const type = db.prepare('SELECT * FROM order_types WHERE id = ?').get(b.order_type_id);
   if (!type) return res.status(400).json({ error: 'Loại order không hợp lệ' });
 
-  // Mọi order (trừ admin) phải gắn với một App cụ thể -> để áp quy tắc app/quyền
-  if (req.user.role !== 'admin' && !b.app_id) return res.status(400).json({ error: 'Vui lòng chọn App' });
+  // Mọi order (trừ admin) phải gắn với một App cụ thể -> để áp quy tắc app/quyền (nháp thì chưa bắt buộc)
+  if (!isDraft && req.user.role !== 'admin' && !b.app_id) return res.status(400).json({ error: 'Vui lòng chọn App' });
 
   const category = type.category;
   const label = category === 'video' ? 'V' : 'A';
@@ -404,10 +413,10 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'h
   }
 
   const editorId = b.editor_id ? Number(b.editor_id) : null;
-  if (!editorId) return res.status(400).json({ error: 'Vui lòng chọn người làm khi tạo order' });
-  // Cả Ảnh lẫn Video đều cần Lead (đúng loại) duyệt & submit trước khi giao
-  const initStatus = 'Đợi submit';
-  const code = nextOrderCode(label);
+  if (!isDraft && !editorId) return res.status(400).json({ error: 'Vui lòng chọn người làm khi tạo order' });
+  // Nháp: trạng thái "Nháp", mã tạm (không tiêu tốn số V/A). Còn lại: cần Lead duyệt & submit.
+  const initStatus = isDraft ? 'Nháp' : 'Đợi submit';
+  const code = isDraft ? ('NHAP-tmp-' + Date.now() + '-' + Math.floor(Math.random() * 1e6)) : nextOrderCode(label);
 
   const needYoutube = (category === 'video' && b.need_youtube) ? 1 : 0;
   const r = db.prepare(`INSERT INTO orders
@@ -419,7 +428,28 @@ app.post('/api/orders', authenticate, requireRole('ua', 'admin', 'aso', 'po', 'h
     b.description || '', b.ref_link || '', b.size || '', b.note_request || '',
     editorId, initStatus, 0, needYoutube);
 
+  // Nháp dùng mã gọn theo id để hiển thị/đối chiếu (vẫn không phải mã V/A thật)
+  if (isDraft) db.prepare('UPDATE orders SET order_code = ? WHERE id = ?').run('NHAP-' + r.lastInsertRowid, r.lastInsertRowid);
+
   const created = getOrder(r.lastInsertRowid);
+  if (!isDraft) notifyDiscord(created, 'created');
+  res.json(created);
+});
+
+// Chốt một order nháp -> tạo order thật (gán mã V/A, chuyển sang "Đợi submit")
+app.post('/api/orders/:id/finalize', authenticate, (req, res) => {
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+  if (!o) return res.status(404).json({ error: 'Không tìm thấy order' });
+  const isOwner = ORDERER_ROLES.includes(req.user.role) && o.ua_id === req.user.id;
+  if (!(isOwner || req.user.role === 'admin')) return res.status(403).json({ error: 'Không có quyền' });
+  if (o.status !== 'Nháp') return res.status(400).json({ error: 'Order này không phải bản nháp' });
+  if (!o.order_type_id) return res.status(400).json({ error: 'Vui lòng chọn loại order trước khi tạo' });
+  if (!o.app_id) return res.status(400).json({ error: 'Vui lòng chọn App trước khi tạo' });
+  if (!o.editor_id) return res.status(400).json({ error: 'Vui lòng chọn người làm trước khi tạo' });
+  const label = o.category === 'video' ? 'V' : 'A';
+  const code = nextOrderCode(label);
+  db.prepare("UPDATE orders SET order_code = ?, status = 'Đợi submit', order_date = ? WHERE id = ?").run(code, todayStr(), o.id);
+  const created = getOrder(o.id);
   notifyDiscord(created, 'created');
   res.json(created);
 });
@@ -523,45 +553,13 @@ app.patch('/api/orders/:id/assign', authenticate, requireRole('admin'), (req, re
   res.json(getOrder(o.id));
 });
 
-// Order không được xóa (chỉ Hủy). Giữ endpoint cho admin phòng trường hợp đặc biệt.
-app.delete('/api/orders/:id', authenticate, requireRole('admin'), (req, res) => {
+// Order thật không được xóa (chỉ Hủy). Cho phép: admin xóa bất kỳ; người tạo xóa NHÁP của mình.
+app.delete('/api/orders/:id', authenticate, (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!o) return res.status(404).json({ error: 'Không tìm thấy order' });
+  const isOwnerDraft = o.status === 'Nháp' && ORDERER_ROLES.includes(req.user.role) && o.ua_id === req.user.id;
+  if (req.user.role !== 'admin' && !isOwnerDraft) return res.status(403).json({ error: 'Không có quyền' });
   db.prepare('DELETE FROM orders WHERE id = ?').run(o.id);
-  res.json({ ok: true });
-});
-
-// ---- Bản nháp order (Lưu nháp) -------------------------------------------
-// Nháp là dữ liệu form lưu tạm, riêng tư theo người order; chốt = tạo order thật rồi xóa nháp.
-const canDraft = (u) => ORDERER_ROLES.includes(u.role) || u.role === 'admin';
-
-app.get('/api/order_drafts', authenticate, (req, res) => {
-  if (!canDraft(req.user)) return res.json([]);
-  const rows = db.prepare('SELECT id, data, updated_at FROM order_drafts WHERE ua_id = ? ORDER BY updated_at DESC').all(req.user.id);
-  res.json(rows.map(r => { let data = {}; try { data = JSON.parse(r.data); } catch (e) {} return { id: r.id, updated_at: r.updated_at, data }; }));
-});
-
-app.post('/api/order_drafts', authenticate, (req, res) => {
-  if (!canDraft(req.user)) return res.status(403).json({ error: 'Không có quyền' });
-  const data = JSON.stringify((req.body && req.body.data) || {});
-  const r = db.prepare('INSERT INTO order_drafts (ua_id, data) VALUES (?, ?)').run(req.user.id, data);
-  res.json({ id: r.lastInsertRowid });
-});
-
-app.put('/api/order_drafts/:id', authenticate, (req, res) => {
-  const d = db.prepare('SELECT * FROM order_drafts WHERE id = ?').get(req.params.id);
-  if (!d) return res.status(404).json({ error: 'Không tìm thấy nháp' });
-  if (d.ua_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Không có quyền' });
-  const data = JSON.stringify((req.body && req.body.data) || {});
-  db.prepare("UPDATE order_drafts SET data = ?, updated_at = datetime('now','localtime') WHERE id = ?").run(data, d.id);
-  res.json({ ok: true });
-});
-
-app.delete('/api/order_drafts/:id', authenticate, (req, res) => {
-  const d = db.prepare('SELECT * FROM order_drafts WHERE id = ?').get(req.params.id);
-  if (!d) return res.json({ ok: true });
-  if (d.ua_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Không có quyền' });
-  db.prepare('DELETE FROM order_drafts WHERE id = ?').run(d.id);
   res.json({ ok: true });
 });
 
@@ -866,7 +864,7 @@ app.get('/api/reports/ua', authenticate, requireRole('admin', 'ua'), (req, res) 
     FROM orders o
     JOIN users u ON u.id = o.ua_id
     LEFT JOIN order_types t ON t.id = o.order_type_id
-    WHERE o.order_date BETWEEN ? AND ? AND u.role = 'ua' AND u.active = 1${uaFilter}
+    WHERE o.order_date BETWEEN ? AND ? AND u.role = 'ua' AND u.active = 1 AND o.status != 'Nháp'${uaFilter}
   `).all(...params);
 
   const perUserMap = {}, byTypeMap = {};
@@ -887,7 +885,7 @@ app.get('/api/reports/ua', authenticate, requireRole('admin', 'ua'), (req, res) 
   const timeline = db.prepare(`
     SELECT o.order_date AS day, COUNT(o.id) AS cnt
     FROM orders o
-    WHERE o.order_date BETWEEN ? AND ?${uaFilter}
+    WHERE o.order_date BETWEEN ? AND ? AND o.status != 'Nháp'${uaFilter}
     GROUP BY o.order_date ORDER BY o.order_date
   `).all(...params);
 
@@ -903,7 +901,7 @@ app.get('/api/reports/ua/:uaId/by-app', authenticate, requireRole('admin', 'ua')
     FROM orders o
     LEFT JOIN apps a ON a.id = o.app_id
     LEFT JOIN order_types t ON t.id = o.order_type_id
-    WHERE o.ua_id = ? AND o.order_date BETWEEN ? AND ?
+    WHERE o.ua_id = ? AND o.order_date BETWEEN ? AND ? AND o.status != 'Nháp'
   `).all(req.params.uaId, from, to);
 
   const map = {};
@@ -935,14 +933,14 @@ app.get('/api/reports/editor', authenticate, requireRole('admin', 'editor'), (re
            AVG(CASE WHEN o.status='Hoàn thành' AND o.completed_at IS NOT NULL
                 THEN julianday(o.completed_at) - julianday(o.order_date) END) AS avg_days
     FROM users u
-    JOIN orders o ON o.editor_id = u.id AND o.order_date BETWEEN ? AND ?${edFilter}
+    JOIN orders o ON o.editor_id = u.id AND o.order_date BETWEEN ? AND ? AND o.status != 'Nháp'${edFilter}
     WHERE u.role='editor' AND u.active = 1
     GROUP BY u.id ORDER BY active_orders DESC, done_orders DESC
   `).all(...params);
 
   const byStatus = db.prepare(`
     SELECT o.status, COUNT(o.id) AS cnt
-    FROM orders o WHERE o.editor_id IS NOT NULL AND o.order_date BETWEEN ? AND ?${edFilter}
+    FROM orders o WHERE o.editor_id IS NOT NULL AND o.order_date BETWEEN ? AND ? AND o.status != 'Nháp'${edFilter}
     GROUP BY o.status
   `).all(...params);
 
@@ -960,10 +958,10 @@ app.get('/api/reports/editor', authenticate, requireRole('admin', 'editor'), (re
 // Tổng quan
 app.get('/api/reports/summary', authenticate, requireRole('admin'), (req, res) => {
   const { from, to } = dateRange(req.query);
-  const total = db.prepare("SELECT COUNT(*) c, SUM(points) p FROM orders WHERE order_date BETWEEN ? AND ?").get(from, to);
-  const byStatus = db.prepare("SELECT status, COUNT(*) c FROM orders WHERE order_date BETWEEN ? AND ? GROUP BY status").all(from, to);
-  const byCategory = db.prepare("SELECT category, COUNT(*) c FROM orders WHERE order_date BETWEEN ? AND ? GROUP BY category").all(from, to);
-  const unassigned = db.prepare("SELECT COUNT(*) c FROM orders WHERE editor_id IS NULL AND order_date BETWEEN ? AND ?").get(from, to).c;
+  const total = db.prepare("SELECT COUNT(*) c, SUM(points) p FROM orders WHERE order_date BETWEEN ? AND ? AND status != 'Nháp'").get(from, to);
+  const byStatus = db.prepare("SELECT status, COUNT(*) c FROM orders WHERE order_date BETWEEN ? AND ? AND status != 'Nháp' GROUP BY status").all(from, to);
+  const byCategory = db.prepare("SELECT category, COUNT(*) c FROM orders WHERE order_date BETWEEN ? AND ? AND status != 'Nháp' GROUP BY category").all(from, to);
+  const unassigned = db.prepare("SELECT COUNT(*) c FROM orders WHERE editor_id IS NULL AND order_date BETWEEN ? AND ? AND status != 'Nháp'").get(from, to).c;
   res.json({
     total_orders: total.c || 0,
     total_points: total.p || 0,

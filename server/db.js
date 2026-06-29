@@ -145,14 +145,6 @@ function init() {
       key   TEXT PRIMARY KEY,
       value TEXT
     );
-
-    -- Bản nháp order (lưu tạm dữ liệu form của người order, chưa chốt tạo order)
-    CREATE TABLE IF NOT EXISTS order_drafts (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      ua_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      data       TEXT NOT NULL,                 -- JSON dữ liệu form
-      updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-    );
   `);
 
   // Migration nhẹ cho DB cũ
